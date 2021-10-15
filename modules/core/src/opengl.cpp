@@ -596,7 +596,7 @@ void cv::ogl::Buffer::copyFrom(InputArray arr, Target target, bool autoRelease)
 
     const Size asize = arr.size();
     const int atype = arr.type();
-    
+
     create(asize, atype, target, autoRelease);
 
     switch (kind)
@@ -1418,22 +1418,6 @@ void cv::ogl::Arrays::bind() const
 #endif
 }
 
-
-////////////////////////////////////////////////////////////////////////
-// ogl::Attribute
-
-cv::ogl::Attribute::Attribute(Buffer buffer, size_t stride, size_t offset, int size, Type type, bool integer, bool normalized, unsigned int shader_loc)
-{
-    buffer_ = buffer;
-    stride_ = stride;
-    offset_ = offset;
-    size_ = size;
-    type_ = type;
-    integer_ = integer;
-    normalized_ = normalized;
-    shader_loc_ = shader_loc;
-}
-
 ////////////////////////////////////////////////////////////////////////
 // ogl::VertexArray
 
@@ -1828,7 +1812,7 @@ cv::ogl::Program::Impl::Impl(Shader vert, Shader frag, bool autoRelease) : progr
         gl::GetProgramInfoLog(programId_, GLsizei(info_log.size()) + 1, nullptr, &info_log[0]);
         CV_Error(Error::OpenGlApiCallError, info_log);
     }
-    
+
     CV_CheckGlError();
 
     vert_ = vert;
@@ -2196,7 +2180,7 @@ void cv::ogl::drawElements(int first, int count, int type, int mode)
     throw_no_ogl();
 #else
     gl::DrawElements(mode, count, type, reinterpret_cast<const void*>(first));
-#endif 
+#endif
 }
 
 void cv::ogl::enable(int cap)
@@ -2206,7 +2190,7 @@ void cv::ogl::enable(int cap)
     throw_no_ogl();
 #else
     gl::Enable(cap);
-#endif 
+#endif
 }
 
 void cv::ogl::disable(int cap)
@@ -2216,7 +2200,7 @@ void cv::ogl::disable(int cap)
     throw_no_ogl();
 #else
     gl::Disable(cap);
-#endif 
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////
