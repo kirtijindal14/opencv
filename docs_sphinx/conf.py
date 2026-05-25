@@ -61,7 +61,7 @@ PY_DOC_MODULES = [
 # ---------------------------------------------------------------------------
 CONTRIB_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_CONTRIB_MODULES") or "ml,bgsegm,bioinspired,cannops,ccalib,cnn_3dobj,cvv,dnn_objdetect,dnn_superres,gapi,hdf,julia,line_descriptor,phase_unwrapping,structured_light").split(",")
+    for m in (_os.environ.get("OPENCV_CONTRIB_MODULES") or "ml,bgsegm,bioinspired,cannops,ccalib,cnn_3dobj,cvv,dnn_objdetect,dnn_superres,gapi,hdf,julia,line_descriptor,phase_unwrapping,structured_light,viz").split(",")
     if m.strip()
 ]
 CONTRIB_ROOT = pathlib.Path(
