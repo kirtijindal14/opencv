@@ -49,7 +49,7 @@ JS_DOC_MODULES = [
 # js_tutorials (root index + per-module table_of_content + sub-tutorials).
 PY_DOC_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core").split(",")
+    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core,py_imgproc").split(",")
     if m.strip()
 ]
 
@@ -112,14 +112,55 @@ _TAG_FILE = pathlib.Path(_os.environ.get(
 
 # anchor -> doxygen URL filename (from opencv.tag if available).
 _TAG_FILENAMES: dict[str, str] = {}
+# cv-namespace short-name -> full doxygen URL (function, enum value, typedef,
+# class, struct). Python tutorials reference these as `cv.cvtColor`,
+# `cv.INTER_LINEAR`, `cv.Mat`, etc. — Doxygen auto-links them but CommonMark
+# doesn't, so step 7c (`_linkify_cv_symbols`) reads this map to replicate it.
+_CV_SYMBOL_URL: dict[str, str] = {}
 if _TAG_FILE.is_file():
     try:
         import xml.etree.ElementTree as _ET
-        for _c in _ET.parse(str(_TAG_FILE)).getroot().iter("compound"):
-            if _c.get("kind") == "page":
+        _tag_root = _ET.parse(str(_TAG_FILE)).getroot()
+        for _c in _tag_root.iter("compound"):
+            _kind = _c.get("kind")
+            if _kind == "page":
                 _n, _f = _c.findtext("name"), _c.findtext("filename")
                 if _n and _f:
                     _TAG_FILENAMES[_n] = _f if _f.endswith(".html") else _f + ".html"
+            elif _kind == "namespace" and _c.findtext("name") == "cv":
+                for _m in _c.findall("member"):
+                    _n = _m.findtext("name")
+                    _af = _m.findtext("anchorfile")
+                    _an = _m.findtext("anchor") or ""
+                    if not (_n and _af):
+                        continue
+                    _CV_SYMBOL_URL.setdefault(
+                        _n, DOXYGEN_BASE_URL + _af + (f"#{_an}" if _an else "")
+                    )
+            elif _kind in ("class", "struct"):
+                _full = _c.findtext("name") or ""
+                if _full.startswith("cv::"):
+                    _short = _full.split("::")[-1]
+                    _af = _c.findtext("filename")
+                    if _short and _af:
+                        _CV_SYMBOL_URL.setdefault(_short, DOXYGEN_BASE_URL + _af)
+            else:
+                # `CV_*` C macros (e.g. CV_8U, CV_64F, CV_16S) live as
+                # `kind="define"` members of source-file or group compounds.
+                # Python bindings re-export them as `cv.CV_*`; capture them
+                # so tutorials writing `cv.CV_8U` get linked too.
+                for _m in _c.findall("member"):
+                    if _m.get("kind") != "define":
+                        continue
+                    _n = _m.findtext("name") or ""
+                    if not _n.startswith("CV_"):
+                        continue
+                    _af = _m.findtext("anchorfile")
+                    _an = _m.findtext("anchor") or ""
+                    if _af:
+                        _CV_SYMBOL_URL.setdefault(
+                            _n, DOXYGEN_BASE_URL + _af + (f"#{_an}" if _an else "")
+                        )
     except Exception:
         pass
 
@@ -361,6 +402,31 @@ def _translate(text: str, docname: str | None = None) -> str:
     text = re.sub(r"^(?P<indent>[ \t]*)-#[ \t]+",
                   lambda m: f"{m.group('indent')}1. ", text, flags=re.MULTILINE)
 
+    # 0c. Dedent "orphan" indented bullets that sit directly under a
+    #     paragraph (e.g. `In this chapter, you will learn\n    -   foo` in
+    #     py_imgproc/py_template_matching). Doxygen renders these as a real
+    #     bullet list; CommonMark treats them as paragraph continuation or
+    #     (after a blank line) as a code block. Insert a paragraph break and
+    #     strip the leading indent so CommonMark sees a proper list.
+    _orphan_bullets_re = re.compile(
+        r"^(?P<before>(?![ \t#=*\->]).+\n)"
+        r"(?P<bullets>(?:[ \t]{2,}-[ \t]+[^\n]+\n)+)",
+        re.MULTILINE,
+    )
+    def _dedent_orphan_bullets(m: re.Match) -> str:
+        before = m.group("before")
+        raw = m.group("bullets")
+        lines = raw.split("\n")
+        nonempty = [l for l in lines if l.strip()]
+        if not nonempty:
+            return m.group(0)
+        min_indent = min(len(l) - len(l.lstrip(" \t")) for l in nonempty)
+        dedented = "\n".join(
+            l[min_indent:] if len(l) >= min_indent else l for l in lines
+        )
+        return before + "\n" + dedented
+    text = _orphan_bullets_re.sub(_dedent_orphan_bullets, text)
+
     # 1. Heading anchors: "Title {#name}\n===" (setext) and "## Title {#name}" (ATX).
     #    Strip the anchor from the rendered heading and emit a MyST label
     #    "(name)=" immediately above. Setext converted to ATX for simplicity.
@@ -525,7 +591,12 @@ def _translate(text: str, docname: str | None = None) -> str:
         # A bullet item: `-` + optional prefix text + @subpage/@ref + anchor.
         # E.g. `-   stitching. @subpage tutorial_stitcher` (tutorials/others/).
         bullet  = r"^[ \t]*-\s+[^\n@]*?@(?:subpage|ref)\s+[\w-]+(?:[^\n]*)\n"
-        desc_re = r"(?:[ \t]*\n[ \t]+[^\n]+(?:\n[ \t]+[^\n]+)*\n?)*"
+        # Description: 0+ "description blocks", each being optional blank
+        # lines followed by 1+ indented content lines. Accepts both
+        # `- @subpage X\n\n    desc` (blank line before desc) and
+        # `- @subpage X\n    desc` (desc on immediately-next line, as in
+        # py_imgproc/py_transforms/py_table_of_contents_transforms.markdown).
+        desc_re = r"(?:(?:[ \t]*\n)*(?:[ \t]+[^\n]+\n)+)*"
         pat = re.compile(rf"((?:{bullet}{desc_re}(?:[ \t]*\n)*)+)", re.MULTILINE)
         item_pat = re.compile(
             rf"^[ \t]*-\s+[^\n@]*?@(?P<kind>subpage|ref)\s+(?P<anchor>[\w-]+)[^\n]*\n"
@@ -563,8 +634,10 @@ def _translate(text: str, docname: str | None = None) -> str:
             if not any(d for *_, d in resolved):
                 # No descriptions -> plain (visible) toctree, preserving the
                 # legacy rendering for tables-of-contents like photo's.
+                # `:titlesonly:` keeps Sphinx from auto-expanding the included
+                # docs' H2 subsections as bonus toctree entries.
                 if tt_body:
-                    return f"\n```{{toctree}}\n:maxdepth: 1\n\n{tt_body}\n```\n"
+                    return f"\n```{{toctree}}\n:maxdepth: 1\n:titlesonly:\n\n{tt_body}\n```\n"
                 # All @ref + no descriptions: drop the run (rare).
                 return ""
 
@@ -577,7 +650,7 @@ def _translate(text: str, docname: str | None = None) -> str:
                     list_lines.append("")
                     list_lines.append(f"  {desc}")
                 list_lines.append("")
-            preamble = (f"\n```{{toctree}}\n:hidden:\n:maxdepth: 1\n\n{tt_body}\n```\n"
+            preamble = (f"\n```{{toctree}}\n:hidden:\n:maxdepth: 1\n:titlesonly:\n\n{tt_body}\n```\n"
                         if tt_body else "")
             return f"{preamble}\n{chr(10).join(list_lines).rstrip()}\n"
         return pat.sub(repl, src)
@@ -698,12 +771,17 @@ def _translate(text: str, docname: str | None = None) -> str:
         return pat.sub(repl, src, count=1)
     text = _wrap_front_matter(text)
 
-    # 14. Auto-linkify bare URLs. CommonMark requires explicit `<URL>` or
-    #     `[text](URL)` markup to make a URL clickable — Doxygen's renderer
-    #     was lenient and turned bare `https://...` into links. Mirror that
-    #     by wrapping bare URLs in `<...>`, but only outside fenced code
-    #     blocks, inline code spans, and existing markdown links / autolinks
-    #     / HTML attribute values.
+    # 14a. Auto-link `cv.SymbolName` references in Python tutorial prose so
+    #      they point at the matching Doxygen API page (Doxygen's auto-linker
+    #      does this magic out of the box; CommonMark doesn't). Skip when the
+    #      symbol isn't in the tag-file map so unknown names stay literal.
+    text = _linkify_cv_symbols(text)
+
+    # 14b. Auto-linkify bare URLs. CommonMark requires explicit `<URL>` or
+    #      `[text](URL)` markup to make a URL clickable — Doxygen's renderer
+    #      was lenient and turned bare `https://...` into links. Mirror that
+    #      by wrapping bare URLs in `<...>`. Runs after the cv-symbol step
+    #      so the new `[cv.X](URL)` links aren't picked up as bare URLs.
     text = _linkify_bare_urls(text)
 
     return text
@@ -713,6 +791,20 @@ _BARE_URL_RE = re.compile(
     r"(?<![<\[(\w\"'=])"
     r"(?P<url>https?://[^\s<>()`\"']+[^\s<>()`\"'.,;:!?])"
 )
+# Match `cv.X` where X is a Python identifier. Negative lookbehind blocks
+# matches like `frame.cv.X` (preceded by `.`) and `mycv.X` (word char).
+# Optionally consume an immediately-following `()` so the link text reads
+# `cv.foo()` instead of `cv.foo` when the source used the call form with
+# no arguments (matches Doxygen's appearance).
+_CV_SYMBOL_RE = re.compile(
+    r"(?<![/\w.])cv\.(?P<sym>[A-Za-z_]\w*)(?P<parens>\(\))?"
+)
+# Bare `funcName()` references — Doxygen auto-linked these too, even without
+# the `cv.` prefix. The angle-bracket exclusions in the lookbehind avoid
+# nested-anchor double-wrapping after `_CV_SYMBOL_RE` already replaced
+# `cv.X()` -> `<a ...>cv.X()</a>` (the X part inside the anchor is preceded
+# by `.`, but ensure other anchor internals are also off-limits).
+_BARE_FN_RE = re.compile(r"(?<![/\w.<>\"])(?P<sym>[A-Za-z_]\w{2,})\(\)")
 _FENCED_BLOCK_RE = re.compile(
     r"^(?P<fence>[`~]{3,})[^\n]*\n[\s\S]*?\n(?P=fence)[ \t]*$",
     re.MULTILINE,
@@ -720,23 +812,57 @@ _FENCED_BLOCK_RE = re.compile(
 _INLINE_CODE_RE = re.compile(r"`+[^`\n]*?`+")
 
 
-def _linkify_bare_urls(src: str) -> str:
-    def _linkify_segment(text: str) -> str:
+def _apply_outside_code(src: str, transform) -> str:
+    """Apply `transform(str) -> str` to every region of `src` that is not
+    inside a fenced code block or an inline code span."""
+    def _segment(text: str) -> str:
         out, last = [], 0
         for cm in _INLINE_CODE_RE.finditer(text):
-            out.append(_BARE_URL_RE.sub(r"<\g<url>>", text[last:cm.start()]))
+            out.append(transform(text[last:cm.start()]))
             out.append(cm.group(0))
             last = cm.end()
-        out.append(_BARE_URL_RE.sub(r"<\g<url>>", text[last:]))
+        out.append(transform(text[last:]))
         return "".join(out)
-
     out, last = [], 0
     for fm in _FENCED_BLOCK_RE.finditer(src):
-        out.append(_linkify_segment(src[last:fm.start()]))
+        out.append(_segment(src[last:fm.start()]))
         out.append(fm.group(0))
         last = fm.end()
-    out.append(_linkify_segment(src[last:]))
+    out.append(_segment(src[last:]))
     return "".join(out)
+
+
+def _linkify_bare_urls(src: str) -> str:
+    return _apply_outside_code(src,
+        lambda chunk: _BARE_URL_RE.sub(r"<\g<url>>", chunk))
+
+
+def _linkify_cv_symbols(src: str) -> str:
+    if not _CV_SYMBOL_URL:
+        return src
+    def repl_cv(m: re.Match) -> str:
+        sym = m.group("sym")
+        url = _CV_SYMBOL_URL.get(sym)
+        if not url:
+            return m.group(0)
+        parens = m.group("parens") or ""
+        # HTML anchor (not markdown `[text](url)`) so the link survives when
+        # the source embeds the reference inside raw HTML — e.g. the
+        # `<center><em>cv.calcHist(...)</em></center>` function-signature
+        # blocks in py_histograms. CommonMark doesn't re-parse markdown
+        # inside raw HTML blocks; inline HTML inside markdown does render.
+        return f'<a href="{url}">cv.{sym}{parens}</a>'
+    def repl_bare(m: re.Match) -> str:
+        sym = m.group("sym")
+        url = _CV_SYMBOL_URL.get(sym)
+        if not url:
+            return m.group(0)
+        return f'<a href="{url}">{sym}()</a>'
+    def transform(chunk: str) -> str:
+        chunk = _CV_SYMBOL_RE.sub(repl_cv, chunk)
+        chunk = _BARE_FN_RE.sub(repl_bare, chunk)
+        return chunk
+    return _apply_outside_code(src, transform)
 
 
 def _source_read(app, docname, source):
