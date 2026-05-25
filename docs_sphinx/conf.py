@@ -49,7 +49,7 @@ JS_DOC_MODULES = [
 # js_tutorials (root index + per-module table_of_content + sub-tutorials).
 PY_DOC_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core,py_imgproc,py_video").split(",")
+    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core,py_imgproc,py_video,py_photo,py_objdetect").split(",")
     if m.strip()
 ]
 
@@ -174,6 +174,24 @@ if _TAG_FILE.is_file():
 
 def _doxygen_url(page: str) -> str:
     return DOXYGEN_BASE_URL + _TAG_FILENAMES.get(page, page)
+
+
+# ---- Citation numbering --------------------------------------------------
+# `@cite KEY` resolves to `[N]` where N is the entry's position in
+# `doc/opencv.bib` sorted case-insensitively by key (Doxygen's default
+# ordering). Doxygen's live citelist.html numbers map keys to integers the
+# same way; reading from the bib means our build is self-contained and
+# doesn't need a network fetch.
+_CITE_NUMBER: dict[str, int] = {}
+_BIB_FILE = DOC_ROOT / "opencv.bib"
+if _BIB_FILE.is_file():
+    try:
+        _bib_text = _BIB_FILE.read_text(encoding="utf-8", errors="replace")
+        _bib_keys = re.findall(r"@\w+\s*\{\s*(\S+?)\s*,", _bib_text)
+        for _i, _k in enumerate(sorted(_bib_keys, key=str.lower), 1):
+            _CITE_NUMBER[_k] = _i
+    except OSError:
+        pass
 
 
 # ---- Redirect-page map ---------------------------------------------------
@@ -441,26 +459,40 @@ def _translate(text: str, docname: str | None = None) -> str:
         if PY_DOC_MODULES:
             text += "\n- @subpage tutorial_py_root\n"
 
-    # 0a. py_tutorials root: when py_video is onboarded, rewrite the legacy
-    #     `@ref tutorial_table_of_content_video` (which points to a stale
-    #     C++ TOC anchor) into `@subpage tutorial_py_table_of_contents_video`
-    #     so the entry lands as an internal toctree link and the page joins
-    #     the sidebar nav. The destination is itself a redirect page that
-    #     links onward to the corresponding C++ content.
-    if docname == "py_tutorials/py_tutorials" and "py_video" in PY_DOC_MODULES:
-        text = re.sub(
-            r"@ref\s+tutorial_table_of_content_video\b",
-            "@subpage tutorial_py_table_of_contents_video",
-            text,
-        )
+    # 0a. py_tutorials root: rewrite specific cross-tree `@ref` items to
+    #     `@subpage` so the targets join the sidebar nav. The author of
+    #     py_tutorials.markdown used `@ref` for these (rather than @subpage)
+    #     because they live in the C++ tutorial tree, but pyData's sidebar
+    #     hierarchy benefits from surfacing them under Python tutorials too.
+    #     Doing this only for known cases avoids the cycle that a generic
+    #     @ref-to-toctree promotion would trigger from reciprocal links
+    #     between py_setup pages.
+    if docname == "py_tutorials/py_tutorials":
+        if "py_video" in PY_DOC_MODULES:
+            text = re.sub(
+                r"@ref\s+tutorial_table_of_content_video\b",
+                "@subpage tutorial_py_table_of_contents_video",
+                text,
+            )
+        # Object Detection lives in the C++ `objdetect` module (which is in
+        # DOC_MODULES by default); promote the @ref so the section appears
+        # under Python Tutorials in the sidebar.
+        if "objdetect" in DOC_MODULES:
+            text = re.sub(
+                r"@ref\s+tutorial_table_of_content_objdetect\b",
+                "@subpage tutorial_table_of_content_objdetect",
+                text,
+            )
 
-    # 0d. py_video pages are pure "Content has been moved" stubs — listing
-    #     the sub-tutorials underneath their parent TOC would clutter the
-    #     redirect page (Doxygen doesn't do it). Mark every page in py_video
-    #     as `:orphan:` so they're compiled (for legacy URL compatibility)
-    #     but stay out of the sidebar nav and don't trigger
-    #     "not in any toctree" warnings.
-    if docname and docname.startswith("py_tutorials/py_video/"):
+    # 0d. py_video and py_objdetect are pure "Content has been moved" stub
+    #     trees — every page just redirects to the corresponding C++
+    #     tutorial. Mark them as `:orphan:` so they're compiled (for legacy
+    #     URL compatibility) but stay out of the sidebar nav and don't
+    #     trigger "not in any toctree" warnings. The py_tutorials root's
+    #     visible link for these sections is already routed (via step 0a)
+    #     to the actual destination.
+    if docname and (docname.startswith("py_tutorials/py_video/")
+                    or docname.startswith("py_tutorials/py_objdetect/")):
         text = "---\norphan: true\n---\n\n" + text
 
     # 0b. Doxygen automatic-numbered list items: "-# foo" -> "1. foo". MyST /
@@ -698,7 +730,14 @@ def _translate(text: str, docname: str | None = None) -> str:
             if not resolved:
                 return ""
 
-            # toctree gets only @subpage entries (navigation), not @ref.
+            # toctree gets only @subpage entries (navigation). Putting all
+            # internal @ref targets in the toctree would create cycles —
+            # py_setup pages cross-reference each other (`tutorial_py_root`,
+            # `tutorial_py_pip_install`, etc.) and folding those into the
+            # nav tree makes Sphinx hit RecursionError. When a particular
+            # cross-tree @ref needs to surface in the sidebar (e.g. the
+            # py_tutorials root's reference to objdetect), inject a
+            # synthetic @subpage in step 0 instead.
             tt_lines = []
             for kind, doctype, target, title, _, _ in resolved:
                 if kind != "subpage":
@@ -762,8 +801,20 @@ def _translate(text: str, docname: str | None = None) -> str:
     text = re.sub(r'@ref\s+(?P<name>[\w-]+)(?:\s+"(?P<disp>[^"]+)")?',
                   _ref_repl, text)
 
-    # 8. @cite KEY -> [KEY]
-    text = re.sub(r"@cite\s+([\w-]+)", r"[\1]", text)
+    # 8. @cite KEY -> `[N]` HTML anchor linking to the Doxygen citelist page,
+    #    where N is the entry's alphabetical position in doc/opencv.bib
+    #    (built into `_CITE_NUMBER` at module load). HTML anchor so the
+    #    brackets survive markdown processing. Falls back to the key when
+    #    not in the bib map. `_apply_outside_code` keeps citations inside
+    #    code blocks literal.
+    def _cite_repl(m: re.Match) -> str:
+        key = m.group("key")
+        num = _CITE_NUMBER.get(key)
+        label = f"[{num}]" if num is not None else f"[{key}]"
+        return (f'<a href="{DOXYGEN_BASE_URL}citelist.html#CITEREF_'
+                f'{key}">{label}</a>')
+    text = _apply_outside_code(text, lambda chunk: re.sub(
+        r"@cite\s+(?P<key>[\w-]+)", _cite_repl, chunk))
 
     # 8b. @youtube{ID}  -> responsive embed (raw HTML, passed through by MyST).
     text = re.sub(
@@ -880,13 +931,14 @@ _BARE_URL_RE = re.compile(
     r"(?<![<\[(\w\"'=])"
     r"(?P<url>https?://[^\s<>()`\"']+[^\s<>()`\"'.,;:!?])"
 )
-# Match `cv.X` where X is a Python identifier. Negative lookbehind blocks
-# matches like `frame.cv.X` (preceded by `.`) and `mycv.X` (word char).
-# Optionally consume an immediately-following `()` so the link text reads
-# `cv.foo()` instead of `cv.foo` when the source used the call form with
-# no arguments (matches Doxygen's appearance).
+# Match `cv.X` (Python) or `cv::X` (C++) — both reference the same OpenCV
+# symbol map. Negative lookbehind blocks `frame.cv.X`, `mycv.X`, `[cv::X`,
+# and `foo::cv::X`-style false positives. Captures the separator so the
+# link text preserves the source's style (`cv.cvtColor` vs `cv::cvtColor`).
+# Optionally consumes a following `()` so the link reads `cv.foo()` /
+# `cv::foo()` when the source used the parens-only call form.
 _CV_SYMBOL_RE = re.compile(
-    r"(?<![/\w.])cv\.(?P<sym>[A-Za-z_]\w*)(?P<parens>\(\))?"
+    r"(?<![/\w.:\[])(?P<sep>cv(?:\.|::))(?P<sym>[A-Za-z_]\w*)(?P<parens>\(\))?"
 )
 # Bare `funcName()` references — Doxygen auto-linked these too, even without
 # the `cv.` prefix. The angle-bracket exclusions in the lookbehind avoid
@@ -934,13 +986,14 @@ def _linkify_cv_symbols(src: str) -> str:
         url = _CV_SYMBOL_URL.get(sym)
         if not url:
             return m.group(0)
+        sep = m.group("sep")  # "cv." (Python) or "cv::" (C++)
         parens = m.group("parens") or ""
         # HTML anchor (not markdown `[text](url)`) so the link survives when
         # the source embeds the reference inside raw HTML — e.g. the
         # `<center><em>cv.calcHist(...)</em></center>` function-signature
         # blocks in py_histograms. CommonMark doesn't re-parse markdown
         # inside raw HTML blocks; inline HTML inside markdown does render.
-        return f'<a href="{url}">cv.{sym}{parens}</a>'
+        return f'<a href="{url}">{sep}{sym}{parens}</a>'
     def repl_bare(m: re.Match) -> str:
         sym = m.group("sym")
         url = _CV_SYMBOL_URL.get(sym)
