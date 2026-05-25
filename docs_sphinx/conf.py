@@ -49,7 +49,7 @@ JS_DOC_MODULES = [
 # js_tutorials (root index + per-module table_of_content + sub-tutorials).
 PY_DOC_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core,py_imgproc").split(",")
+    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core,py_imgproc,py_video").split(",")
     if m.strip()
 ]
 
@@ -112,6 +112,11 @@ _TAG_FILE = pathlib.Path(_os.environ.get(
 
 # anchor -> doxygen URL filename (from opencv.tag if available).
 _TAG_FILENAMES: dict[str, str] = {}
+# anchor -> human-readable title (from <title> in opencv.tag). Used when the
+# bullet handler falls back to an external Doxygen URL: we want the link
+# text to be "Video analysis (video module)" rather than the raw anchor
+# name "tutorial_table_of_content_video".
+_TAG_TITLES: dict[str, str] = {}
 # cv-namespace short-name -> full doxygen URL (function, enum value, typedef,
 # class, struct). Python tutorials reference these as `cv.cvtColor`,
 # `cv.INTER_LINEAR`, `cv.Mat`, etc. — Doxygen auto-links them but CommonMark
@@ -125,8 +130,11 @@ if _TAG_FILE.is_file():
             _kind = _c.get("kind")
             if _kind == "page":
                 _n, _f = _c.findtext("name"), _c.findtext("filename")
+                _t = _c.findtext("title")
                 if _n and _f:
                     _TAG_FILENAMES[_n] = _f if _f.endswith(".html") else _f + ".html"
+                if _n and _t:
+                    _TAG_TITLES[_n] = _t
             elif _kind == "namespace" and _c.findtext("name") == "cv":
                 for _m in _c.findall("member"):
                     _n = _m.findtext("name")
@@ -166,6 +174,43 @@ if _TAG_FILE.is_file():
 
 def _doxygen_url(page: str) -> str:
     return DOXYGEN_BASE_URL + _TAG_FILENAMES.get(page, page)
+
+
+# ---- Redirect-page map ---------------------------------------------------
+# OpenCV's docs include many "stub" pages whose entire body is
+# `Content has been moved: @ref destination`. Following these chains at
+# render time means inline `@ref X` ends up pointing at the actual content
+# instead of an intermediate redirect (which would itself need clicking
+# through). Built from anything under `doc/{tutorials,py_tutorials,
+# js_tutorials}/**/*.markdown`; `_old/` subtrees are intentionally included
+# because that's where many of the canonical redirect stubs live.
+_REDIRECT_MAP: dict[str, str] = {}
+_REDIRECT_RE = re.compile(
+    r"\{#(?P<src>[\w-]+)\}\s*\n[=\-]+\s*\n+"
+    r"\s*(?:Content|Tutorial\s+content)\s+has\s+been\s+moved\b"
+    r"[^@]{0,300}@ref\s+(?P<dst>[\w-]+)",
+    re.IGNORECASE,
+)
+for _scan_dir in ("tutorials", "py_tutorials", "js_tutorials"):
+    _root = DOC_ROOT / _scan_dir
+    if not _root.is_dir():
+        continue
+    for _md in _root.rglob("*.markdown"):
+        try:
+            _t = _md.read_text(encoding="utf-8", errors="replace")[:2000]
+        except OSError:
+            continue
+        _m = _REDIRECT_RE.search(_t)
+        if _m:
+            _REDIRECT_MAP[_m.group("src")] = _m.group("dst")
+
+def _resolve_redirect(anchor: str) -> str:
+    """Follow `_REDIRECT_MAP` transitively. Cycles bail safely."""
+    seen: set[str] = set()
+    while anchor in _REDIRECT_MAP and anchor not in seen:
+        seen.add(anchor)
+        anchor = _REDIRECT_MAP[anchor]
+    return anchor
 
 # -- HTML / PyData theme ----------------------------------------------------
 try:
@@ -396,6 +441,28 @@ def _translate(text: str, docname: str | None = None) -> str:
         if PY_DOC_MODULES:
             text += "\n- @subpage tutorial_py_root\n"
 
+    # 0a. py_tutorials root: when py_video is onboarded, rewrite the legacy
+    #     `@ref tutorial_table_of_content_video` (which points to a stale
+    #     C++ TOC anchor) into `@subpage tutorial_py_table_of_contents_video`
+    #     so the entry lands as an internal toctree link and the page joins
+    #     the sidebar nav. The destination is itself a redirect page that
+    #     links onward to the corresponding C++ content.
+    if docname == "py_tutorials/py_tutorials" and "py_video" in PY_DOC_MODULES:
+        text = re.sub(
+            r"@ref\s+tutorial_table_of_content_video\b",
+            "@subpage tutorial_py_table_of_contents_video",
+            text,
+        )
+
+    # 0d. py_video pages are pure "Content has been moved" stubs — listing
+    #     the sub-tutorials underneath their parent TOC would clutter the
+    #     redirect page (Doxygen doesn't do it). Mark every page in py_video
+    #     as `:orphan:` so they're compiled (for legacy URL compatibility)
+    #     but stay out of the sidebar nav and don't trigger
+    #     "not in any toctree" warnings.
+    if docname and docname.startswith("py_tutorials/py_video/"):
+        text = "---\norphan: true\n---\n\n" + text
+
     # 0b. Doxygen automatic-numbered list items: "-# foo" -> "1. foo". MyST /
     #     CommonMark sequentially numbers identical-marker ordered lists, so
     #     successive "1." items render as 1, 2, 3, ...
@@ -599,53 +666,66 @@ def _translate(text: str, docname: str | None = None) -> str:
         desc_re = r"(?:(?:[ \t]*\n)*(?:[ \t]+[^\n]+\n)+)*"
         pat = re.compile(rf"((?:{bullet}{desc_re}(?:[ \t]*\n)*)+)", re.MULTILINE)
         item_pat = re.compile(
-            rf"^[ \t]*-\s+[^\n@]*?@(?P<kind>subpage|ref)\s+(?P<anchor>[\w-]+)[^\n]*\n"
+            rf"^[ \t]*-\s+(?P<prefix>[^\n@]*?)@(?P<kind>subpage|ref)\s+(?P<anchor>[\w-]+)[^\n]*\n"
             rf"(?P<desc>{desc_re})",
             re.MULTILINE)
 
         def repl(m: re.Match) -> str:
-            resolved: list[tuple[str, str, str, str, str]] = []  # kind, doctype, target, title, desc
+            resolved: list[tuple[str, str, str, str, str, str]] = []  # kind, doctype, target, title, desc, prefix
             for im in item_pat.finditer(m.group(1)):
                 kind = im.group("kind")  # "subpage" or "ref"
                 anchor = im.group("anchor")
+                # Bullet prefix (e.g. `stitching. ` in `-   stitching. @subpage X`)
+                # — kept as plain text before the link so the "others" TOC
+                # reads "stitching. High level stitching API" the way Doxygen
+                # renders it.
+                prefix = (im.group("prefix") or "").strip()
                 desc_lines = [l.strip() for l in (im.group("desc") or "").splitlines() if l.strip()]
                 description = " ".join(desc_lines)
-                if anchor in _ANCHOR_TO_DOC:
-                    resolved.append((kind, "internal", _ANCHOR_TO_DOC[anchor],
-                                     _ANCHOR_TO_TITLE.get(anchor, anchor), description))
-                elif anchor in _ANCHOR_TO_EXTERNAL:
-                    title, url = _ANCHOR_TO_EXTERNAL[anchor]
-                    resolved.append((kind, "external", url, title, description))
-                elif anchor in _TAG_FILENAMES:
-                    resolved.append((kind, "external", _doxygen_url(anchor),
-                                     anchor, description))
+                # `@ref` follows redirect chains; `@subpage` does not (it
+                # determines navigation, so we want the literal target).
+                lookup = _resolve_redirect(anchor) if kind == "ref" else anchor
+                if lookup in _ANCHOR_TO_DOC:
+                    resolved.append((kind, "internal", _ANCHOR_TO_DOC[lookup],
+                                     _ANCHOR_TO_TITLE.get(lookup, lookup), description, prefix))
+                elif lookup in _ANCHOR_TO_EXTERNAL:
+                    title, url = _ANCHOR_TO_EXTERNAL[lookup]
+                    resolved.append((kind, "external", url, title, description, prefix))
+                elif lookup in _TAG_FILENAMES:
+                    title = _TAG_TITLES.get(lookup, lookup)
+                    resolved.append((kind, "external", _doxygen_url(lookup),
+                                     title, description, prefix))
             if not resolved:
                 return ""
 
             # toctree gets only @subpage entries (navigation), not @ref.
             tt_lines = []
-            for kind, doctype, target, title, _ in resolved:
+            for kind, doctype, target, title, _, _ in resolved:
                 if kind != "subpage":
                     continue
                 tt_lines.append("/" + target if doctype == "internal"
                                 else f"{title} <{target}>")
             tt_body = "\n".join(tt_lines)
 
-            if not any(d for *_, d in resolved):
-                # No descriptions -> plain (visible) toctree, preserving the
-                # legacy rendering for tables-of-contents like photo's.
-                # `:titlesonly:` keeps Sphinx from auto-expanding the included
-                # docs' H2 subsections as bonus toctree entries.
+            has_descriptions = any(d for *_, d, _ in resolved)
+            has_prefixes = any(p for *_, p in resolved)
+            if not (has_descriptions or has_prefixes):
+                # Plain rendering -> Sphinx-style toctree directive (kept
+                # for the photo / objdetect / etc. TOCs whose bullets are
+                # bare `- @subpage X`). `:titlesonly:` blocks H2 expansion.
                 if tt_body:
                     return f"\n```{{toctree}}\n:maxdepth: 1\n:titlesonly:\n\n{tt_body}\n```\n"
-                # All @ref + no descriptions: drop the run (rare).
+                # All @ref + no descriptions/prefixes: drop the run.
                 return ""
 
             # Hidden toctree (subpages only) + visible list (all items).
+            # Prefix sits OUTSIDE the link so Doxygen-style category labels
+            # (`stitching. <link>`, `video. <link>`) render as plain text.
             list_lines = []
-            for _kind, doctype, target, title, desc in resolved:
+            for _kind, doctype, target, title, desc, prefix in resolved:
                 href = f"/{target}" if doctype == "internal" else target
-                list_lines.append(f"- [{title}]({href})")
+                prefix_text = f"{prefix} " if prefix else ""
+                list_lines.append(f"- {prefix_text}[{title}]({href})")
                 if desc:
                     list_lines.append("")
                     list_lines.append(f"  {desc}")
@@ -664,12 +744,21 @@ def _translate(text: str, docname: str | None = None) -> str:
     #    onboarded into the Sphinx wrapper yet.
     def _ref_repl(m: re.Match) -> str:
         name = m.group("name"); disp = m.group("disp")
-        target = _ANCHOR_TO_DOC.get(name)
+        # Follow chained "Content has been moved: @ref X" redirects so
+        # users land directly at the final destination — e.g. the inline
+        # ref `@ref tutorial_table_of_content_video` inside the py_video
+        # TOC resolves through `tutorial_table_of_content_video` (itself
+        # a stub) to `tutorial_table_of_content_other` (the real page).
+        resolved = _resolve_redirect(name)
+        target = _ANCHOR_TO_DOC.get(resolved)
         if target:
-            return f"[{disp or name}]({'/' + target})"
-        if name in _TAG_FILENAMES:
-            return f"[{disp or name}]({_doxygen_url(name)})"
-        return f"[{disp or name}](#{name})"
+            link_text = (disp or _ANCHOR_TO_TITLE.get(resolved)
+                         or _TAG_TITLES.get(resolved) or resolved)
+            return f"[{link_text}](/{target})"
+        if resolved in _TAG_FILENAMES:
+            link_text = disp or _TAG_TITLES.get(resolved, resolved)
+            return f"[{link_text}]({_doxygen_url(resolved)})"
+        return f"[{disp or resolved}](#{resolved})"
     text = re.sub(r'@ref\s+(?P<name>[\w-]+)(?:\s+"(?P<disp>[^"]+)")?',
                   _ref_repl, text)
 
