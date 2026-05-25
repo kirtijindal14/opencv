@@ -18,7 +18,7 @@ from toctrees automatically.
 """
 
 from __future__ import annotations
-import pathlib, re, shutil as _shutil, textwrap as _textwrap
+import pathlib, re, textwrap as _textwrap
 
 HERE = pathlib.Path(__file__).parent.resolve()
 DOC_ROOT = (HERE.parent / "doc").resolve()
@@ -61,7 +61,7 @@ PY_DOC_MODULES = [
 # ---------------------------------------------------------------------------
 CONTRIB_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_CONTRIB_MODULES") or "ml,bgsegm,bioinspired,cannops,ccalib,cnn_3dobj,cvv,dnn_objdetect,dnn_superres,gapi").split(",")
+    for m in (_os.environ.get("OPENCV_CONTRIB_MODULES") or "ml,bgsegm,bioinspired,cannops,ccalib,cnn_3dobj,cvv,dnn_objdetect,dnn_superres,gapi,hdf,julia,line_descriptor,phase_unwrapping,structured_light").split(",")
     if m.strip()
 ]
 CONTRIB_ROOT = pathlib.Path(
@@ -439,9 +439,7 @@ for _toc in (DOC_ROOT / "py_tutorials").glob("*/py_table_of_contents_*.markdown"
 # `![alt](js_assets/foo.jpg)` references resolve the same way. Contrib trees
 # are scanned below: under <m>/tutorials they're indexed against the staged
 # tutorials_contrib/<m> symlink; outside <m>/tutorials they use a
-# _contrib_images/<rel> URL that's materialized lazily by
-# _materialize_contrib_image().
-import shutil as _shutil
+# `contrib_modules/<rel>` URL served from html_extra_path (see below).
 _IMAGE_INDEX: dict[str, str] = {}
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".bmp", ".webp"}
 for _root in ((DOC_ROOT / "tutorials").rglob("images/*"),
@@ -460,6 +458,9 @@ for _m in CONTRIB_MODULES:
                 _rel = _img.relative_to(_tut).as_posix()
                 _IMAGE_INDEX.setdefault(_img.name,
                                         f"tutorials_contrib/{_m}/{_rel}")
+    # Contrib images outside <m>/tutorials/ (<m>/doc/pics, <m>/samples).
+    # URL is /contrib_modules/<m>/<rest>. Files are served from there via
+    # html_extra_path set below — no copies in srcdir.
     for _sub in ("doc", "samples"):
         _src = CONTRIB_ROOT / _m / _sub
         if _src.is_dir():
@@ -467,20 +468,31 @@ for _m in CONTRIB_MODULES:
                 if _img.is_file() and _img.suffix.lower() in _IMAGE_EXTS:
                     _rel = _img.relative_to(CONTRIB_ROOT).as_posix()
                     _IMAGE_INDEX.setdefault(_img.name,
-                                            f"_contrib_images/{_rel}")
+                                            f"contrib_modules/{_rel}")
 
 
-def _materialize_contrib_image(url: str) -> None:
-    """Copy a contrib image into srcdir on first reference so Sphinx
-    can find it. Idempotent; lazy."""
-    if not url.startswith("_contrib_images/"):
-        return
-    rel = url[len("_contrib_images/"):]
-    src = CONTRIB_ROOT / rel
-    dest = SPHINX_INPUT_ROOT / "_contrib_images" / rel
-    if src.is_file() and not dest.exists():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        _shutil.copy2(src, dest)
+# Expose each enabled contrib module as a symlink under a build-dir subdir
+# and let Sphinx's html_extra_path publish the tree to the output. Output
+# URLs are /contrib_modules/<m>/... — no files duplicated in srcdir.
+# Skipped when SPHINX_INPUT_ROOT lives inside a source tree (i.e. ad-hoc
+# sphinx-build without CMake's OPENCV_SPHINX_INPUT_ROOT) — matches the
+# documented "always build through CMake" expectation.
+html_extra_path: list[str] = []
+def _in_source_tree(p: pathlib.Path) -> bool:
+    for _root in (DOC_ROOT, CONTRIB_ROOT):
+        try: p.relative_to(_root); return True
+        except ValueError: pass
+    return False
+if not _in_source_tree(SPHINX_INPUT_ROOT):
+    _extras = SPHINX_INPUT_ROOT.parent / "contrib_extras"
+    _prefix = _extras / "contrib_modules"
+    _prefix.mkdir(parents=True, exist_ok=True)
+    for _m in CONTRIB_MODULES:
+        _src, _link = CONTRIB_ROOT / _m, _prefix / _m
+        if _src.is_dir() and not _link.exists():
+            try: _os.symlink(_src, _link, target_is_directory=True)
+            except (OSError, NotImplementedError): pass
+    html_extra_path = [str(_extras)]
 
 _TOGGLE_LABELS = {"cpp": "C++", "java": "Java", "python": "Python"}
 
@@ -1125,9 +1137,12 @@ def _translate(text: str, docname: str | None = None) -> str:
     # 8d. Dedent indented description paragraphs after `- @subpage X`
     #     so they render as normal text, not as code blocks.
     def _dedent_subpage_descriptions(src: str) -> str:
+        # Accept either 4+ spaces/tabs OR a single leading tab as the
+        # continuation indent (one tab = bullet content column in
+        # CommonMark — phase_unwrapping uses this).
         pat = re.compile(
             r"^(?P<bullet>[ \t]*-\s+[^\n]*@subpage\s+[\w-]+[^\n]*)\n"
-            r"(?P<desc>(?:[ \t]*\n|[ \t]{4,}[^\n]+(?:\n|$))+)",
+            r"(?P<desc>(?:[ \t]*\n|(?:\t|[ \t]{4,})[^\n]+(?:\n|$))+)",
             re.MULTILINE)
         def repl(m: re.Match) -> str:
             desc = _textwrap.dedent(m.group("desc")).strip("\n")
@@ -1213,17 +1228,35 @@ def _translate(text: str, docname: str | None = None) -> str:
         lambda m: m.group(1) + re.sub(r"^    ", "", m.group(2), flags=re.MULTILINE),
         text, flags=re.MULTILINE)
 
+    # Depth-relative prefix from the current doc back to the site root,
+    # used to point `<img src>` at `<output>/contrib_modules/...` files
+    # that html_extra_path publishes (Sphinx can't pathto-rewrite URLs
+    # for files outside srcdir, so we compute the ../ count ourselves).
+    _depth = docname.count("/") if docname else 0
+    _contrib_url_prefix = ("../" * _depth) + "contrib_modules/"
+
+    def _emit_contrib_img(rel_url: str, alt: str) -> str:
+        """Raw-HTML <img> (or <figure> if alt is 'Figure ...') for a
+        contrib_modules/<rel> path — bypasses Sphinx's image processing
+        so the depth-relative URL survives to the rendered HTML."""
+        src = _contrib_url_prefix + rel_url
+        img = f'<img src="{src}" alt="{alt}"/>'
+        if alt.startswith("Figure "):
+            return (f'<figure>{img}'
+                    f'<figcaption>{alt}</figcaption></figure>')
+        return img
+
     # 12. Image paths "images/foo.png" or "js_assets/foo.jpg" — resolve like
     #     Doxygen's flat IMAGE_PATH: prefer the doc's own asset sibling, then
     #     fall back to a global basename lookup across every tutorial `images/`
     #     folder plus `js_tutorials/js_assets/`. As a final fallback, point at
-    #     the consolidated `tutorials/others/images/` dir (where modules like
-    #     `photo` store their assets). For contrib pages, resolves under
-    #     `<m>/tutorials/<rest>/images/`. Also matches `<prefix>/images/...`
-    #     — some tutorials prefix the directory name (multiview_calibration
-    #     does this) which Doxygen IMAGE_PATH ignores but MyST would resolve
-    #     literally and miss.
+    #     the consolidated `tutorials/others/images/` dir. For contrib pages,
+    #     resolves under `<m>/tutorials/<rest>/images/`. Also matches
+    #     `<prefix>/images/...` — some tutorials prefix the directory name
+    #     (multiview_calibration does this) which Doxygen IMAGE_PATH ignores
+    #     but MyST would resolve literally and miss.
     def _img_repl(m: re.Match) -> str:
+        alt = m.group("alt")
         rel = m.group("rel")
         asset_dir = m.group("dir")
         if docname:
@@ -1236,21 +1269,23 @@ def _translate(text: str, docname: str | None = None) -> str:
                 rest = pathlib.Path(*parts[2:]) if len(parts) > 2 else pathlib.Path()
                 local = CONTRIB_ROOT / parts[1] / "tutorials" / rest / asset_dir / rel
             if local is not None and local.is_file():
-                return f'{m.group("pre")}{asset_dir}/{rel})'
+                return f'![{alt}]({asset_dir}/{rel})'
         hit = _IMAGE_INDEX.get(pathlib.Path(rel).name)
         if hit:
-            _materialize_contrib_image(hit)
-            return f'{m.group("pre")}/{hit})'
-        return f'{m.group("pre")}/tutorials/others/images/{rel})'
+            if hit.startswith("contrib_modules/"):
+                return _emit_contrib_img(hit[len("contrib_modules/"):], alt)
+            return f'![{alt}](/{hit})'
+        return f'![{alt}](/tutorials/others/images/{rel})'
     text = re.sub(
-        r'(?P<pre>!\[[^\]]*\]\()(?:[^)]*?/)?(?P<dir>images|js_assets)/(?P<rel>[^)]+)\)',
+        r'!\[(?P<alt>[^\]]*)\]\((?:[^)]*?/)?(?P<dir>images|js_assets)/(?P<rel>[^)]+)\)',
         _img_repl, text)
 
-    # 12b. Cross-tree image refs (Doxygen IMAGE_PATH flattening) for
-    #      contrib pages: `pics/foo.jpg` (<m>/doc/pics/), `<m>/samples/...`,
-    #      etc. Try module-relative bases; first match gets materialized.
+    # 12b. Cross-tree image refs for contrib pages (Doxygen IMAGE_PATH
+    #      flattening): `pics/foo.jpg` → <m>/doc/pics/, `<m>/samples/...`,
+    #      etc. Try module-relative bases; first match becomes raw-HTML
+    #      <img> with a depth-relative /contrib_modules/<m>/<rest> URL.
     def _img_xtree(m: re.Match) -> str:
-        rel = m.group("rel")
+        alt, rel = m.group("alt"), m.group("rel")
         if rel.startswith("/") or "://" in rel:
             return m.group(0)
         if rel.startswith("./"):
@@ -1265,12 +1300,10 @@ def _translate(text: str, docname: str | None = None) -> str:
                      f"{module}/{rel}",
                      rel):
             if (CONTRIB_ROOT / cand).is_file():
-                url = f"_contrib_images/{cand}"
-                _materialize_contrib_image(url)
-                return f'{m.group("pre")}/{url})'
+                return _emit_contrib_img(cand, alt)
         return m.group(0)
     text = re.sub(
-        r'(?P<pre>!\[[^\]]*\]\()(?P<rel>[^)]+)\)',
+        r'!\[(?P<alt>[^\]]*)\]\((?P<rel>[^)]+)\)',
         _img_xtree, text)
 
     # 12d. Force a blank line between consecutive `Label: ![](image)`
@@ -1280,6 +1313,16 @@ def _translate(text: str, docname: str | None = None) -> str:
         r"^(?P<line>(?!\|)[^\n]*!\[[^\]]*\]\([^)]+\)[^\n]*)\n"
         r"(?=(?!\|)[^\n]*!\[[^\]]*\]\([^)]+\))",
         r"\g<line>\n\n", text, flags=re.MULTILINE)
+
+    # 12e. `![Figure N: caption](url)` → MyST `{figure}` directive so the
+    #      caption renders visibly (plain image syntax keeps caption only
+    #      in alt=). Used by hdf/* tutorials.
+    text = re.sub(
+        r"^(?P<indent>[ \t]*)!\[(?P<caption>Figure\s[^\]]+)\]\((?P<url>[^)]+)\)\s*$",
+        lambda m: (f"{m.group('indent')}:::{{figure}} {m.group('url')}\n"
+                   f"{m.group('indent')}{m.group('caption')}\n"
+                   f"{m.group('indent')}:::"),
+        text, flags=re.MULTILINE)
 
     # 13. Wrap the Original-author/Compatibility front-matter table
     #     in a `.opencv-meta-table` div so custom.css can style it.
