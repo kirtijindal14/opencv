@@ -49,7 +49,7 @@ JS_DOC_MODULES = [
 # js_tutorials (root index + per-module table_of_content + sub-tutorials).
 PY_DOC_MODULES = [
     m.strip()
-    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup").split(",")
+    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup,py_core").split(",")
     if m.strip()
 ]
 
