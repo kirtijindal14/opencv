@@ -45,6 +45,14 @@ JS_DOC_MODULES = [
     if m.strip()
 ]
 
+# Same pattern for opencv/doc/py_tutorials/. OpenCV-Python's tree mirrors
+# js_tutorials (root index + per-module table_of_content + sub-tutorials).
+PY_DOC_MODULES = [
+    m.strip()
+    for m in (_os.environ.get("OPENCV_PY_DOC_MODULES") or "py_setup").split(",")
+    if m.strip()
+]
+
 # -- Project ----------------------------------------------------------------
 project = "OpenCV"
 author = "OpenCV Team"
@@ -71,6 +79,8 @@ include_patterns = ["tutorials/tutorials.markdown"] + [
     f"tutorials/{m}/**" for m in DOC_MODULES
 ] + (["js_tutorials/js_tutorials.markdown"] if JS_DOC_MODULES else []) + [
     f"js_tutorials/{m}/**" for m in JS_DOC_MODULES
+] + (["py_tutorials/py_tutorials.markdown"] if PY_DOC_MODULES else []) + [
+    f"py_tutorials/{m}/**" for m in PY_DOC_MODULES
 ]
 exclude_patterns = ["**/Thumbs.db", "**/.DS_Store", "**/_old/**"]
 
@@ -191,7 +201,10 @@ def _scan_internal(path: pathlib.Path) -> None:
     if path.is_file():
         files = [path] if path.suffix in _SUFFIXES else []
     elif path.is_dir():
-        files = [p for s in _SUFFIXES for p in path.rglob(f"*{s}")]
+        # Skip `_old/**` — matches exclude_patterns so we don't register
+        # anchors whose target docs Sphinx never compiles.
+        files = [p for s in _SUFFIXES for p in path.rglob(f"*{s}")
+                 if "_old" not in p.parts]
     else:
         files = []
     for md in files:
@@ -236,6 +249,10 @@ if JS_DOC_MODULES:
     _scan_internal(DOC_ROOT / "js_tutorials" / "js_tutorials.markdown")
 for _m in JS_DOC_MODULES:
     _scan_internal(DOC_ROOT / "js_tutorials" / _m)
+if PY_DOC_MODULES:
+    _scan_internal(DOC_ROOT / "py_tutorials" / "py_tutorials.markdown")
+for _m in PY_DOC_MODULES:
+    _scan_internal(DOC_ROOT / "py_tutorials" / _m)
 
 # External scan: every OTHER module's top-level table_of_content_*.markdown.
 for _toc in (DOC_ROOT / "tutorials").glob("*/table_of_content_*.markdown"):
@@ -244,6 +261,10 @@ for _toc in (DOC_ROOT / "tutorials").glob("*/table_of_content_*.markdown"):
 # Same for js_tutorials (files are named js_table_of_contents_*.markdown there).
 for _toc in (DOC_ROOT / "js_tutorials").glob("*/js_table_of_contents_*.markdown"):
     if _toc.parent.name not in JS_DOC_MODULES:
+        _scan_external(_toc)
+# py_tutorials uses the `py_table_of_contents_*.markdown` naming variant.
+for _toc in (DOC_ROOT / "py_tutorials").glob("*/py_table_of_contents_*.markdown"):
+    if _toc.parent.name not in PY_DOC_MODULES:
         _scan_external(_toc)
 
 # Doxygen flattens IMAGE_PATH across every `images/` folder under the tutorial
@@ -258,6 +279,7 @@ _IMAGE_INDEX: dict[str, str] = {}
 for _root in ((DOC_ROOT / "tutorials").rglob("images/*"),
               (DOC_ROOT / "js_tutorials").rglob("images/*"),
               (DOC_ROOT / "js_tutorials" / "js_assets").glob("*"),
+              (DOC_ROOT / "py_tutorials").rglob("images/*"),
               (DOC_ROOT / "images").glob("*")):
     for _img in _root:
         if _img.is_file():
@@ -322,12 +344,16 @@ def _emit_toggles(tabs: list[tuple[str, str]]) -> str:
 
 
 def _translate(text: str, docname: str | None = None) -> str:
-    # 0. Master doc: synthesize a @subpage entry for the js_tutorials root so
-    #    step 9 picks it up as a toctree entry. tutorials.markdown has no
-    #    direct reference to js_tutorials, and editing it is forbidden, so the
-    #    only way to surface js content in the master sidebar is to inject.
-    if docname == "tutorials/tutorials" and JS_DOC_MODULES:
-        text += "\n- @subpage tutorial_js_root\n"
+    # 0. Master doc: synthesize @subpage entries for the js_tutorials and/or
+    #    py_tutorials roots so step 9 picks them up as toctree entries.
+    #    tutorials.markdown has no direct reference to either, and editing it
+    #    is forbidden, so injection here is the only way to surface those
+    #    trees in the master sidebar.
+    if docname == "tutorials/tutorials":
+        if JS_DOC_MODULES:
+            text += "\n- @subpage tutorial_js_root\n"
+        if PY_DOC_MODULES:
+            text += "\n- @subpage tutorial_py_root\n"
 
     # 0b. Doxygen automatic-numbered list items: "-# foo" -> "1. foo". MyST /
     #     CommonMark sequentially numbers identical-marker ordered lists, so
@@ -487,6 +513,76 @@ def _translate(text: str, docname: str | None = None) -> str:
         r"@link\s+(?P<target>[\w-]+)(?P<disp>.*?)@endlink",
         _link_repl, text, flags=re.DOTALL)
 
+    # 6c. Bullet lists of @subpage / @ref items (collected runs -> toctree +
+    #     visible list). Runs BEFORE step 7 so @ref items are still in raw
+    #     form. @subpage entries register in the toctree (navigation tree);
+    #     @ref entries are render-only links — useful for module roots like
+    #     py_tutorials.markdown that mix both. When items carry indented
+    #     descriptions (the `js`/`py` table_of_contents format), emits a
+    #     hidden toctree plus a visible link+description list so the
+    #     descriptions render as paragraphs, not code blocks.
+    def _subpage_list_to_toctree(src: str) -> str:
+        # A bullet item: `-` + optional prefix text + @subpage/@ref + anchor.
+        # E.g. `-   stitching. @subpage tutorial_stitcher` (tutorials/others/).
+        bullet  = r"^[ \t]*-\s+[^\n@]*?@(?:subpage|ref)\s+[\w-]+(?:[^\n]*)\n"
+        desc_re = r"(?:[ \t]*\n[ \t]+[^\n]+(?:\n[ \t]+[^\n]+)*\n?)*"
+        pat = re.compile(rf"((?:{bullet}{desc_re}(?:[ \t]*\n)*)+)", re.MULTILINE)
+        item_pat = re.compile(
+            rf"^[ \t]*-\s+[^\n@]*?@(?P<kind>subpage|ref)\s+(?P<anchor>[\w-]+)[^\n]*\n"
+            rf"(?P<desc>{desc_re})",
+            re.MULTILINE)
+
+        def repl(m: re.Match) -> str:
+            resolved: list[tuple[str, str, str, str, str]] = []  # kind, doctype, target, title, desc
+            for im in item_pat.finditer(m.group(1)):
+                kind = im.group("kind")  # "subpage" or "ref"
+                anchor = im.group("anchor")
+                desc_lines = [l.strip() for l in (im.group("desc") or "").splitlines() if l.strip()]
+                description = " ".join(desc_lines)
+                if anchor in _ANCHOR_TO_DOC:
+                    resolved.append((kind, "internal", _ANCHOR_TO_DOC[anchor],
+                                     _ANCHOR_TO_TITLE.get(anchor, anchor), description))
+                elif anchor in _ANCHOR_TO_EXTERNAL:
+                    title, url = _ANCHOR_TO_EXTERNAL[anchor]
+                    resolved.append((kind, "external", url, title, description))
+                elif anchor in _TAG_FILENAMES:
+                    resolved.append((kind, "external", _doxygen_url(anchor),
+                                     anchor, description))
+            if not resolved:
+                return ""
+
+            # toctree gets only @subpage entries (navigation), not @ref.
+            tt_lines = []
+            for kind, doctype, target, title, _ in resolved:
+                if kind != "subpage":
+                    continue
+                tt_lines.append("/" + target if doctype == "internal"
+                                else f"{title} <{target}>")
+            tt_body = "\n".join(tt_lines)
+
+            if not any(d for *_, d in resolved):
+                # No descriptions -> plain (visible) toctree, preserving the
+                # legacy rendering for tables-of-contents like photo's.
+                if tt_body:
+                    return f"\n```{{toctree}}\n:maxdepth: 1\n\n{tt_body}\n```\n"
+                # All @ref + no descriptions: drop the run (rare).
+                return ""
+
+            # Hidden toctree (subpages only) + visible list (all items).
+            list_lines = []
+            for _kind, doctype, target, title, desc in resolved:
+                href = f"/{target}" if doctype == "internal" else target
+                list_lines.append(f"- [{title}]({href})")
+                if desc:
+                    list_lines.append("")
+                    list_lines.append(f"  {desc}")
+                list_lines.append("")
+            preamble = (f"\n```{{toctree}}\n:hidden:\n:maxdepth: 1\n\n{tt_body}\n```\n"
+                        if tt_body else "")
+            return f"{preamble}\n{chr(10).join(list_lines).rstrip()}\n"
+        return pat.sub(repl, src)
+    text = _subpage_list_to_toctree(text)
+
     # 7. @ref name [optional "Display Text"]
     #    Resolution order: enabled-module anchor (internal docname) ->
     #    Doxygen tag (external URL) -> fragment-only fallback. The Doxygen
@@ -529,72 +625,28 @@ def _translate(text: str, docname: str | None = None) -> str:
         kind = _ADMON_KIND[m.group("dir")]
         indent = m.group("indent") or ""
         body = m.group("body").rstrip()
+        # When the fence is indented (admonition inside a `-#`/`1.` list
+        # item) the body's content block must also sit at that column for
+        # MyST to recognize it. Re-indent lines that don't already match:
+        # this covers same-line forms like `    @note Foo...\n    bar...`
+        # whose first body line has zero leading whitespace because the
+        # regex's `[ \t]*` ate the space after the directive name.
+        if indent:
+            re_indented = []
+            for line in body.split("\n"):
+                if not line.strip() or line.startswith(indent):
+                    re_indented.append(line)
+                else:
+                    re_indented.append(indent + line.lstrip(" \t"))
+            body = "\n".join(re_indented)
         return f"\n{indent}:::{{{kind}}}\n{body}\n{indent}:::\n"
+    # The optional `:?` after the directive name accepts the (non-standard
+    # but common in OpenCV-Python docs) form `@note: text` alongside the
+    # canonical `@note text` / `@note\n text`.
     text = re.sub(
-        r"^(?P<indent>[ \t]*)@(?P<dir>note|see|warning)[ \t]*\n?"
+        r"^(?P<indent>[ \t]*)@(?P<dir>note|see|warning):?[ \t]*\n?"
         r"(?P<body>.+?)(?=\n[ \t]*\n|\n[ \t]*@[A-Za-z]|\Z)",
         _admon_repl, text, flags=re.DOTALL | re.MULTILINE)
-
-    # 9. @subpage NAME  (collected blocks -> real toctree).
-    #    Enabled modules' anchors become internal toctree entries.
-    #    Disabled modules' anchors become external links into the Doxygen
-    #    build, so the left sidebar still shows the full module list.
-    #    When the source pairs each `- @subpage X` line with an indented
-    #    description paragraph (the `js_tutorials` / table_of_contents form),
-    #    emit a hidden toctree (for nav) plus a visible bulleted list whose
-    #    items show link + description. Without that handling those indented
-    #    paragraphs would render as CommonMark code blocks.
-    def _subpage_list_to_toctree(src: str) -> str:
-        # Bullet items may carry a descriptive prefix before @subpage, e.g.
-        # `-   stitching. @subpage tutorial_stitcher` (tutorials/others/...).
-        bullet  = r"^[ \t]*-\s+[^\n@]*?@subpage\s+[\w-]+(?:[^\n]*)\n"
-        desc_re = r"(?:[ \t]*\n[ \t]+[^\n]+(?:\n[ \t]+[^\n]+)*\n?)*"
-        pat = re.compile(rf"((?:{bullet}{desc_re}(?:[ \t]*\n)*)+)", re.MULTILINE)
-        item_pat = re.compile(
-            rf"^[ \t]*-\s+[^\n@]*?@subpage\s+(?P<anchor>[\w-]+)[^\n]*\n"
-            rf"(?P<desc>{desc_re})",
-            re.MULTILINE)
-
-        def repl(m: re.Match) -> str:
-            resolved: list[tuple[str, str, str, str]] = []
-            for im in item_pat.finditer(m.group(1)):
-                anchor = im.group("anchor")
-                desc_lines = [l.strip() for l in (im.group("desc") or "").splitlines() if l.strip()]
-                description = " ".join(desc_lines)
-                if anchor in _ANCHOR_TO_DOC:
-                    target = _ANCHOR_TO_DOC[anchor]
-                    title  = _ANCHOR_TO_TITLE.get(anchor, anchor)
-                    resolved.append(("internal", target, title, description))
-                elif anchor in _ANCHOR_TO_EXTERNAL:
-                    title, url = _ANCHOR_TO_EXTERNAL[anchor]
-                    resolved.append(("external", url, title, description))
-            if not resolved:
-                return ""
-
-            tt_lines = ["/" + t if k == "internal" else f"{n} <{t}>"
-                        for k, t, n, _ in resolved]
-            tt_body = "\n".join(tt_lines)
-
-            if not any(d for _, _, _, d in resolved):
-                return f"\n```{{toctree}}\n:maxdepth: 1\n\n{tt_body}\n```\n"
-
-            # Blank line between link and description forces a "loose" list,
-            # so each description renders as its own <p> instead of being
-            # merged onto the link's paragraph.
-            list_lines = []
-            for kind, target, title, desc in resolved:
-                href = f"/{target}" if kind == "internal" else target
-                list_lines.append(f"- [{title}]({href})")
-                if desc:
-                    list_lines.append("")
-                    list_lines.append(f"  {desc}")
-                list_lines.append("")
-            return (
-                f"\n```{{toctree}}\n:hidden:\n:maxdepth: 1\n\n{tt_body}\n```\n"
-                f"\n{chr(10).join(list_lines).rstrip()}\n"
-            )
-        return pat.sub(repl, src)
-    text = _subpage_list_to_toctree(text)
 
     # 10. @next_tutorial / @prev_tutorial  -> drop
     text = re.sub(r"^@(?:next|prev)_tutorial\{[^}]*\}\s*$", "",
@@ -646,13 +698,53 @@ def _translate(text: str, docname: str | None = None) -> str:
         return pat.sub(repl, src, count=1)
     text = _wrap_front_matter(text)
 
+    # 14. Auto-linkify bare URLs. CommonMark requires explicit `<URL>` or
+    #     `[text](URL)` markup to make a URL clickable — Doxygen's renderer
+    #     was lenient and turned bare `https://...` into links. Mirror that
+    #     by wrapping bare URLs in `<...>`, but only outside fenced code
+    #     blocks, inline code spans, and existing markdown links / autolinks
+    #     / HTML attribute values.
+    text = _linkify_bare_urls(text)
+
     return text
+
+
+_BARE_URL_RE = re.compile(
+    r"(?<![<\[(\w\"'=])"
+    r"(?P<url>https?://[^\s<>()`\"']+[^\s<>()`\"'.,;:!?])"
+)
+_FENCED_BLOCK_RE = re.compile(
+    r"^(?P<fence>[`~]{3,})[^\n]*\n[\s\S]*?\n(?P=fence)[ \t]*$",
+    re.MULTILINE,
+)
+_INLINE_CODE_RE = re.compile(r"`+[^`\n]*?`+")
+
+
+def _linkify_bare_urls(src: str) -> str:
+    def _linkify_segment(text: str) -> str:
+        out, last = [], 0
+        for cm in _INLINE_CODE_RE.finditer(text):
+            out.append(_BARE_URL_RE.sub(r"<\g<url>>", text[last:cm.start()]))
+            out.append(cm.group(0))
+            last = cm.end()
+        out.append(_BARE_URL_RE.sub(r"<\g<url>>", text[last:]))
+        return "".join(out)
+
+    out, last = [], 0
+    for fm in _FENCED_BLOCK_RE.finditer(src):
+        out.append(_linkify_segment(src[last:fm.start()]))
+        out.append(fm.group(0))
+        last = fm.end()
+    out.append(_linkify_segment(src[last:]))
+    return "".join(out)
 
 
 def _source_read(app, docname, source):
     # Translate any tutorial doc — the root index plus everything under a
-    # module we enabled in DOC_MODULES / JS_DOC_MODULES.
-    if not (docname.startswith("tutorials/") or docname.startswith("js_tutorials/")):
+    # module we enabled in DOC_MODULES / JS_DOC_MODULES / PY_DOC_MODULES.
+    if not (docname.startswith("tutorials/")
+            or docname.startswith("js_tutorials/")
+            or docname.startswith("py_tutorials/")):
         return
     source[0] = _translate(source[0], docname)
 
