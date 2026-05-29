@@ -482,7 +482,7 @@ def _write_class_stub(cls: dict, out_dir: pathlib.Path,
     out = out_dir / f"{page}.md"
     qualified = cls["qualified"] or cls["name"]
     kind_label = cls["kind"].title()  # "Class" / "Struct"
-    title = f"{kind_label} {qualified}"
+    title = f"{qualified} {kind_label} Reference"
     # Note: no `{#refid}` anchor in the heading — duplicates the
     # docname-derived target. `_generate_api_stubs` seeds the
     # refid→docname mapping into `_ANCHOR_TO_DOC` for `@ref` resolution.
