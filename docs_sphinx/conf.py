@@ -156,13 +156,13 @@ html_theme_options = {
     # navbar-nav.html rewrites each DOXYGEN_BASE_URL target to a local relative
     # path, so these stay on-site (see html_context).
     "external_links": [
-        {"url": _doxygen_url("index.html"),       "name": "Main Page"},
-        {"url": _doxygen_url("pages.html"),       "name": "Related Pages"},
-        {"url": _doxygen_url("namespaces.html"),  "name": "Namespaces"},
-        {"url": _doxygen_url("annotated.html"),   "name": "Classes"},
-        {"url": _doxygen_url("files.html"),       "name": "Files"},
-        {"url": _doxygen_url("examples.html"),    "name": "Examples"},
-        {"url": DOXYGEN_BASE_URL + "javadoc/",    "name": "Java Documentation"},
+        {"url": "index.html",            "name": "Main Page"},
+        {"url": "../api-docs/pages.html",       "name": "Related Pages"},
+        {"url": "../api-docs/namespaces.html",  "name": "Namespaces"},
+        {"url": "../api-docs/annotated.html",   "name": "Classes"},
+        {"url": "../api-docs/files.html",       "name": "Files"},
+        {"url": "../api-docs/examples.html",    "name": "Examples"},
+        {"url": "../api-docs/javadoc/index.html", "name": "Java Documentation"},
     ],
     # Doxygen search engine replaces the native one; render a single trigger in
     # navbar_end (navbar_persistent renders twice → duplicate element IDs).

@@ -317,3 +317,55 @@ add_custom_target(sphinx-clean
   VERBATIM)
 
 message(STATUS "docs_sphinx: sphinx target enabled (sphinx-build: ${SPHINX_BUILD})")
+# ---------------------------------------------------------------------------
+# Dynamic Theme Post-Processor & API Sync Step
+# ---------------------------------------------------------------------------
+
+# 1. Generate the inline Python re-theming script dynamically in the build tree
+set(_POSTPROCESS_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/doxygen_pydata_postprocess.py")
+file(WRITE "${_POSTPROCESS_SCRIPT}" [=[
+import sys
+from pathlib import Path
+
+def process_html_dir(target_dir):
+    path = Path(target_dir)
+    if not path.is_dir():
+        return
+    
+    # Precise tokens matching Abhishek's custom PyData Sphinx color palette
+    bridge_css = """
+    html, body, div.header, div.contents { background-color: #14181e !important; color: #ced6dd !important; }
+    #main-nav { display: none !important; }
+    a, a:visited { color: #539bf5 !important; }
+    div.navpath, .contents tr, .memitem { background-color: #222832 !important; border-color: #48566b !important; }
+    """
+    
+    for html_file in path.glob("**/*.html"):
+        try:
+            content = html_file.read_text(encoding="utf-8", errors="ignore")
+            # Skip if already processed to save time
+            if "/* pydata-bridge */" in content:
+                continue
+                
+            # Force HTML tag to render in dark mode, inject bridge styles, and strip old Doxygen nav menu
+            updated = content.replace("<html", '<html class="dark-mode"')
+            updated = updated.replace("</head>", f"<style>/* pydata-bridge */\n{bridge_css}</style></head>")
+            
+            html_file.write_text(updated, encoding="utf-8")
+        except Exception:
+            pass
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        process_html_dir(sys.argv[1])
+]=])
+
+# 2. Automated Post-Build command to copy files to 'api_docs' and apply dark mode
+add_custom_command(TARGET sphinx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_BINARY_DIR}/doc/doxygen/html"
+        "${_SPHINX_OUTDIR}/api_docs"
+    COMMAND python3 "${_POSTPROCESS_SCRIPT}" "${_SPHINX_OUTDIR}/api_docs"
+    COMMENT "Syncing Doxygen files into clean api_docs layout and forcing dark mode..."
+    VERBATIM
+)
