@@ -519,3 +519,335 @@ html[data-theme="dark"] button.copybtn.success {
 @media (max-width: 768px) {
     button.copybtn { opacity: 1 !important; }
 }
+
+/* --- Class collaboration diagram (.opencv-coll-graph) ------------------- */
+/* The per-class stub embeds the SVG that the legacy Doxygen HTML build
+   rendered (see _find_collaboration_svg in conf.py). Constrain it so a wide
+   diagram never overflows the content column, and keep it left-aligned to
+   match the reference docs.opencv.org class-page layout. */
+/* Two theme variants are emitted (conf.py): a light SVG (native Doxygen, with
+   a transparent backdrop) and a dark SVG (recoloured light-on-dark, also
+   transparent backdrop). They carry the theme's native `.only-light` /
+   `.only-dark` classes, so pydata-sphinx-theme shows exactly one per colour
+   mode and exempts the dark one from its forced-white image background. We
+   only need to size them here — no `display`/`filter` rules, which would
+   fight the theme's `!important` swap. */
+/* Class-only selector: the diagram is inlined as <svg> at build-finished
+   (conf.py) so its links work, so this must match <svg>, not just <img>. */
+.opencv-coll-graph {
+    /* Centre small diagrams in the column. Margin-auto needs a block-level
+       element to work. */
+    display: block;
+    margin: 1rem auto 1.5rem;
+
+    /* Render at the SVG's NATIVE intrinsic size. Doxygen / Graphviz already
+       sized each diagram so the text is readable — we just honour that.
+       `width: auto` + `height: auto` keep the aspect ratio. */
+    width: auto;
+    height: auto;
+
+    /* Crucially NO `max-width: 100%` and NO `max-height: …` here. Those caps
+       used to squash wide diagrams (e.g. cv::NAryMatIterator) down to the
+       content-column width — and once a graph is shrunk uniformly, every
+       label inside it shrinks proportionally and becomes illegible. By
+       removing the caps the diagram keeps its native size; small diagrams
+       fit naturally, large ones overflow into the scrollable wrapper below. */
+}
+
+/* The Sphinx `<p>` that wraps the inlined SVG becomes the horizontal-scroll
+   container. So:
+   * A SMALL diagram (narrower than the column) just sits at native size,
+     centred by the margin:auto above — `text-align: center` keeps it
+     centred for browsers that handle inline svg as inline.
+   * A WIDE diagram (e.g. NAryMatIterator at ~580pt ≈ 770px, or anything
+     larger than the column) overflows to the right, and `overflow-x: auto`
+     exposes a horizontal scrollbar instead of clipping or downscaling.
+   We DON'T touch the `<p>`'s vertical sizing, so tall diagrams still flow
+   normally and push the rest of the content down — they just don't squash. */
+.bd-content p:has(> svg.opencv-coll-graph),
+.bd-content p:has(> img.opencv-coll-graph) {
+    overflow-x: auto;
+    max-width: 100%;
+    text-align: center;
+}
+
+/* --- Clickable enum synopsis (.opencv-enum-synopsis) -------------------- */
+/* The class-page enum block is emitted by _enum_synopsis_html() as raw HTML
+   that uses the Pygments-cpp span classes (`k` keyword, `n` name, `o`
+   operator, `p` punctuation, …). Wrapping it in `.highlight-cpp .highlight`
+   makes Sphinx's existing code-block CSS (background, padding, monospace)
+   apply automatically — we don't have to re-style the block itself. Only
+   the inner anchors need explicit colouring so the names stand out as links
+   instead of inheriting the dark `.n` (identifier) colour. */
+/* Match the exact hex the body uses for every other link so the enum
+   names sit in the same blue palette as `cv::Mat` / `cv::KeyPoint` text
+   links elsewhere on the page. No underline, just the colour. */
+.opencv-enum-synopsis a.opencv-enum-link {
+    color: #0969da !important;
+    text-decoration: none;
+    border-radius: 2px;
+}
+.opencv-enum-synopsis a.opencv-enum-link:hover {
+    color: #0550ae !important;          /* matches `.bd-content a:hover` */
+}
+html[data-theme="dark"] .opencv-enum-synopsis a.opencv-enum-link {
+    color: #539bf5 !important;          /* matches the dark body-link rule */
+}
+html[data-theme="dark"] .opencv-enum-synopsis a.opencv-enum-link:hover {
+    color: #6cb6ff !important;
+}
+
+/* The Member Enumeration Documentation block has the same synopsis as a
+   plain Pygments code block (no `<a>` wrappers). Paint its identifiers
+   with the same hex so the two sections look identical. */
+section#member-enumeration-documentation .highlight-cpp .n {
+    color: #0969da !important;
+}
+html[data-theme="dark"] section#member-enumeration-documentation .highlight-cpp .n {
+    color: #539bf5 !important;
+}
+
+/* --- Class-page header: #include + brief + "More..." ------------------ */
+/* Mirrors docs.opencv.org's class-page header: a small monospace `#include
+   <header.hpp>` line, then the one-line brief description followed by a
+   "More..." link that jumps down to the Detailed Description section. */
+.opencv-class-include {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--pst-color-text-muted);
+}
+.opencv-class-include code {
+    background: var(--pst-color-surface);
+    border: 1px solid var(--pst-color-border);
+    border-radius: 4px;
+    padding: 0.1rem 0.45rem;
+    font-family: var(--pst-font-family-monospace);
+    color: var(--pst-color-text-base);
+}
+.opencv-class-brief {
+    margin: 0 0 1rem;
+    font-size: 1rem;
+    line-height: 1.55;
+    color: var(--pst-color-text-base);
+}
+a.opencv-class-more {
+    color: #0969da;
+    font-weight: 500;
+    text-decoration: none;
+    margin-left: 0.25rem;
+    white-space: nowrap;
+}
+a.opencv-class-more:hover {
+    color: #0550ae;
+    text-decoration: underline;
+}
+html[data-theme="dark"] a.opencv-class-more { color: #539bf5; }
+html[data-theme="dark"] a.opencv-class-more:hover { color: #6cb6ff; }
+
+/* --- Detailed Description: rendered by Breathe ------------------------ */
+/* The detailed description is now produced by `{doxygenclass} :no-members:`
+   and trimmed by the `_strip_breathe_class_clutter` build-finished hook
+   (see conf.py). Sphinx + Pygments already style `<pre>` code blocks via
+   `.highlight`, so we don't need any custom code-block CSS here — the
+   default chrome already matches the rest of the page.
+   We only add a subtle inline-code chip for the body's `<code>` elements
+   so refs like `cv::Mat` read as code, matching docs.opencv.org. */
+/* Breathing room between the section heading and the first content line.
+   Without this the first paragraph hugs the underline of the <h2>, which
+   reads as too tight against the rest of the page's heading spacing. */
+section#detailed-description > h2 {
+    margin-bottom: 1.5rem;
+}
+section#detailed-description code,
+section#member-enumeration-documentation code {
+    background: var(--pst-color-surface);
+    border: 1px solid var(--pst-color-border);
+    border-radius: 3px;
+    padding: 0 0.3rem;
+    font-family: var(--pst-font-family-monospace);
+    font-size: 0.88em;
+}
+/* Cross-references inside the Detailed Description (Breathe emits these
+   for every Doxygen <ref>) come through as `<a class="reference internal">
+   <span class="std std-ref">cv::Mat</span></a>` — plain text, no chip.
+   docs.opencv.org renders these in monospace with a subtle chip background.
+   Match that look: monospace, chip, link colour, link colour from
+   surrounding <a>, no underline. */
+section#detailed-description a.reference > span.std-ref,
+section#member-enumeration-documentation a.reference > span.std-ref {
+    background: var(--pst-color-surface);
+    border: 1px solid var(--pst-color-border);
+    border-radius: 3px;
+    padding: 0 0.3rem;
+    font-family: var(--pst-font-family-monospace);
+    font-size: 0.88em;
+    color: inherit;    /* take the parent <a>'s link colour */
+}
+/* Elements that already style themselves as monospace panels (the enum
+   detail `<dt>` cards) shouldn't double-chip. */
+.opencv-enum-detail dt code,
+.opencv-enum-detail dt .opencv-enum-name,
+.opencv-enum-detail dt .opencv-enum-init {
+    background: transparent;
+    border: 0;
+    padding: 0;
+}
+
+/* (Legacy) Anchor target hidden in the detail section. Empty inline spans
+   used to live here before the per-row layout below replaced them; kept for
+   pages that still carry the old markup. */
+.opencv-enum-target {
+    scroll-margin-top: 5rem;
+}
+
+/* --- Member Enumeration Documentation: per-value detail list ----------- */
+/* Each enum becomes a heading + a `<dl>` where every value is its own row.
+   This is visually distinct from the code-block synopsis at the top of the
+   page, so navigating from a Public Types link feels like a real jump. Each
+   `<dt>` carries an `id="_CPPv4…E"` anchor so clicks land on the specific
+   value, not just the top of the enum block. */
+.opencv-enum-heading {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--pst-color-text-base);
+    scroll-margin-top: 5rem;        /* keep below the sticky navbar */
+}
+.opencv-enum-heading .opencv-enum-name {
+    color: #0969da;
+    font-family: var(--pst-font-family-monospace);
+}
+html[data-theme="dark"] .opencv-enum-heading .opencv-enum-name {
+    color: #539bf5;
+}
+.opencv-enum-detail {
+    margin: 0 0 1.5rem;
+    padding: 0;
+}
+.opencv-enum-detail dt {
+    /* card-style row so each enumerator is visually a clear entry, not just
+       another line of code. */
+    padding: 0.5rem 0.8rem;
+    margin-top: 0.5rem;
+    background: var(--pst-color-surface);
+    border-left: 3px solid #0969da;
+    border-radius: 0 4px 4px 0;
+    font-family: var(--pst-font-family-monospace);
+    font-size: 0.9rem;
+    /* scroll-margin-top so a URL-hash landing on this row sits below the
+       sticky navbar instead of behind it. */
+    scroll-margin-top: 5rem;
+}
+html[data-theme="dark"] .opencv-enum-detail dt {
+    border-left-color: #539bf5;
+}
+.opencv-enum-detail dt .opencv-enum-name {
+    color: #0969da;
+}
+html[data-theme="dark"] .opencv-enum-detail dt .opencv-enum-name {
+    color: #539bf5;
+}
+.opencv-enum-detail dt .opencv-enum-init {
+    color: var(--pst-color-text-muted);
+    font-weight: normal;
+}
+.opencv-enum-detail dd {
+    margin: 0.25rem 0 0 1.5rem;
+    color: var(--pst-color-text-muted);
+}
+/* Subtle target highlight: when the URL hash matches a row, fade it in so
+   the user sees exactly where they landed. */
+.opencv-enum-detail dt:target {
+    background: color-mix(in srgb, var(--pst-color-link) 12%, transparent);
+    transition: background 0.6s ease-out;
+}
+/* The inner `<span class="n">` carries Pygments' identifier colour; the
+   anchor's colour above should win, but be explicit to defeat any theme
+   override on `.highlight .n`. */
+.opencv-enum-synopsis a.opencv-enum-link > span.n {
+    color: inherit !important;
+}
+/* Soft scroll-anchor padding so when a shared URL hash lands here, the line
+   isn't flush against the site header — gives a bit of breathing room. */
+.opencv-enum-synopsis a.opencv-enum-link {
+    scroll-margin-top: 4rem;
+}
+
+/* --- Per-class "Examples" cross-reference (docs.opencv.org parity) ----- */
+/* Emitted by `_write_class_stub` from `_render_examples_block` at the foot
+   of the Detailed Description. Mirrors docs.opencv.org's "Examples:"
+   footer: a single bold label, then plain blue links joined by Oxford
+   commas. NO inline-code chip on the links — the reference site renders
+   them as ordinary cross-reference links (same as their `\see` / `\ref`
+   look), not as code pills, and the user explicitly called that out.
+   No top divider and no left indent on the `<dd>` — the block sits flush
+   against the surrounding text on the same left margin as the rest of
+   the page (matching how docs.opencv.org's <dl class="section examples">
+   renders). */
+dl.opencv-examples {
+    margin: 1.5rem 0 0;
+    padding: 0;
+}
+dl.opencv-examples > dt {
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 0.4rem;
+    color: var(--pst-color-text-base);
+}
+dl[class].opencv-examples > dd {
+    /* `dl[class]…` (not just `dl.opencv-examples`) is intentional: it
+       matches the specificity of pydata-sphinx-theme's blanket
+       `dl[class]:not(.option-list,…,.simple) dd { margin-left: 2rem }`
+       rule (both (0, 2, 2) = 22) so that cascade order — custom.css
+       loads after pydata — lets ours win the tie. Simplifying to
+       `dl.opencv-examples > dd` (specificity 12) loses to pydata's 22
+       and leaves the inherited 2rem indent visible. We want the list of
+       example links flush with the page content's left margin instead
+       of inset under the "Examples" label. */
+    margin: 0;
+    padding: 0;
+    line-height: 1.7;
+}
+/* Plain blue link, no background/border/padding — same chrome the rest of
+   the site gives `<a>` cross-references. Underline only on hover so the
+   inline paragraph stays clean. */
+dl.opencv-examples a.opencv-example-link {
+    text-decoration: none;
+    color: #0969da;
+}
+html[data-theme="dark"] dl.opencv-examples a.opencv-example-link {
+    color: #539bf5;
+}
+dl.opencv-examples a.opencv-example-link:hover {
+    text-decoration: underline;
+}
+/* The Detailed Description's blanket `code { background:…; border:… }` rule
+   would otherwise re-chip any `<code>` Sphinx happens to inject inside an
+   Examples link (e.g. if a future renderer wraps the path in one again).
+   Defang that explicitly so the link styling above stays authoritative. */
+dl.opencv-examples a.opencv-example-link code {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+}
+
+/* --- "On this page" TOC: C++ domain entries ---------------------------- */
+/* Breathe's per-member directives register C++ domain objects, so their
+   TOC entries arrive wrapped in <code class="literal"> pills — unlike the
+   plain section entries. Strip the pill so each reads as an ordinary,
+   clickable TOC link that picks up the nav-link colour (and the accent
+   highlight on the active/hovered entry) like its siblings. */
+.toc-entry a.nav-link code,
+.bd-toc-nav a.nav-link code,
+.toc-entry a.nav-link code.literal,
+.bd-toc-nav a.nav-link code.literal {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    color: inherit !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+}
