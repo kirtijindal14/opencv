@@ -1475,3 +1475,26 @@ a.SRScope {
     color: var(--pst-color-text-muted) !important;
 }
 .SRPage .SRStatus { color: var(--pst-color-text-muted); padding: 8px 16px; }
+
+/* ===========================================================================
+ * Parameters list rebuilt by conf.py's _box_setup_params_on_finish for the
+ * bioinspired setup() overloads. Render exactly like run()'s list: no container
+ * box, default inline-code name chips (not recolored — they inherit run()'s).
+ * Padding mirrors run()'s body rows (1rem) + list indent (→ 2.5rem total).
+ * ===========================================================================
+*/
+.opencv-setup-box {
+    margin: 0;
+    padding: 0.35rem 1rem;
+}
+.opencv-setup-box__title {
+    margin: 0 0 0.35rem;
+    font-weight: 600;
+}
+.opencv-setup-box__list {
+    margin: 0;
+    padding-left: 1.5rem;
+    list-style: disc outside;
+}
+.opencv-setup-box__list > li { margin: 0.2rem 0; }
+.opencv-setup-box__list > li > p { margin: 0; line-height: 1.6; }

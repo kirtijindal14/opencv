@@ -270,9 +270,10 @@ def _write_namespace_stub(ns: dict, out_dir: pathlib.Path,
                 if m["brief"]:
                     lines.append(_md_escape_cell(m["brief"]))
                     lines.append("")
-                lines.append("```cpp")
-                lines.extend(_enum_synopsis_lines(m))
-                lines.append("```")
+                # Clickable synopsis with the namespace scope stripped from each
+                # value (matches the class-page Public Types layout); the `<a>`
+                # ids resolve to the per-value anchors in the detail table below.
+                lines.extend(_enum_synopsis_html(m, strip_scope=ns["name"]))
                 lines.append("")
             continue
         else:
@@ -302,9 +303,12 @@ def _write_namespace_stub(ns: dict, out_dir: pathlib.Path,
                 for m in enum_items:
                     qualified = m["qualified"] or m["name"]
                     keyword = "enum class" if m.get("strong") else "enum"
+                    enum_id = _sphinx_cpp_v4_id(qualified)
                     lines.append(f"({m['id']})=")
                     lines.append(f"### {m['name']}")
                     lines.append("")
+                    # Anchor the synopsis's enum-name link to this heading.
+                    lines += [f'<span id="{enum_id}"></span>', ""]
                     lines += [f"`{keyword} {qualified}`", ""]
                     if m.get("brief"):
                         lines += [_md_escape_cell(m["brief"]), ""]
@@ -320,7 +324,9 @@ def _write_namespace_stub(ns: dict, out_dir: pathlib.Path,
                             cpp_key = f"{scope}::{v['name']}"
                             py_entries = _PY_SIGNATURES.get(cpp_key, [])
                             py_name = py_entries[0]["name"] if py_entries else None
-                            cell = f"`{v['name']}`"
+                            val_id = _sphinx_cpp_v4_id(f"{qualified}::{v['name']}")
+                            # Anchor target for the synopsis's per-value link.
+                            cell = f'<span id="{val_id}"></span>`{v["name"]}`'
                             if py_name:
                                 cell += f"<br>Python: `{py_name}`"
                             if has_desc:

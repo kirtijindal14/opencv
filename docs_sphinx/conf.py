@@ -209,7 +209,51 @@ if not _in_source_tree(SPHINX_INPUT_ROOT):
     html_extra_path = [str(_extras)]
 
 
+# -- Post-process: rebuild loose Doxygen @param breakdowns into a box --------
+# @param tags that follow a bullet list with no blank line get nested in that
+# list by Doxygen, so they leak into the prose as loose `<p>name</p><p>: desc
+# </p>` pairs with no heading (the 3 setup() overloads). Rebuild a run of such
+# pairs at a member-<section> end into a boxed Parameters list like run()'s.
+import re as _re
+
+_SETUP_PARAM_RUN = _re.compile(
+    r'(?:<p>[^:<][^<]*?</p>\s*<p>:(?:(?!</p>).)*</p>\s*)+(?=</section>)', _re.DOTALL)
+_SETUP_PARAM_PAIR = _re.compile(
+    r'<p>([^:<][^<]*?)</p>\s*<p>(:(?:(?!</p>).)*)</p>', _re.DOTALL)
+
+
+def _rebuild_setup_param_box(_m):
+    # Match MyST's `**Parameters**` markup: name chip + em dash + description.
+    items = []
+    for _p in _SETUP_PARAM_PAIR.finditer(_m.group(0)):
+        _name, _desc = _p.group(1).strip(), _p.group(2).strip()
+        items.append(
+            '<li><p><code class="docutils literal notranslate">'
+            '<span class="pre">' + _name + '</span></code> — ' + _desc + '</p></li>')
+    if not items:
+        return _m.group(0)
+    return ('<div class="opencv-setup-box">\n'
+            '<p class="opencv-setup-box__title"><strong>Parameters</strong></p>\n'
+            '<ul class="opencv-setup-box__list">\n'
+            + '\n'.join(items)
+            + '\n</ul>\n</div>\n')
+
+
+def _box_setup_params_on_finish(app, exception):
+    if exception is not None:
+        return
+    for _html in pathlib.Path(app.outdir).rglob("*.html"):
+        try:
+            _txt = _html.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        _new, _n = _SETUP_PARAM_RUN.subn(_rebuild_setup_param_box, _txt)
+        if _n:
+            _html.write_text(_new, encoding="utf-8")
+
+
 def setup(app):
     app.connect("source-read", _source_read)
     app.connect("build-finished", _inline_coll_graphs_on_finish)
+    app.connect("build-finished", _box_setup_params_on_finish)
     return {"parallel_read_safe": True, "parallel_write_safe": True}
