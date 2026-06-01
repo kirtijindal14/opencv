@@ -2,7 +2,30 @@
 from __future__ import annotations
 import pathlib, re, shutil
 
-from .state import DOXYGEN_BASE_URL, _API_XML_DIR
+from .state import _API_XML_DIR, _doxy_page_to_local, _DOXY_ANCHOR_TO_MEMBER
+
+
+def _doxy_parent_page(page: str, api_dir: pathlib.Path) -> str:
+    """Nested types (e.g. `structcv_1_1SparseMat_1_1Hdr`) get no standalone
+    Sphinx page — they're documented inline on the enclosing class. Walk up the
+    `_1_1`-separated scope to the nearest ancestor page that DOES exist locally,
+    so the diagram node stays clickable instead of going dead. Returns "" if no
+    ancestor page exists."""
+    stem = page[:-5] if page.endswith(".html") else page
+    rest = None
+    for pref in ("class", "struct", "union"):
+        if stem.startswith(pref):
+            rest = stem[len(pref):]      # e.g. 'cv_1_1SparseMat_1_1Hdr'
+            break
+    if rest is None:
+        return ""
+    while "_1_1" in rest:
+        rest = rest.rsplit("_1_1", 1)[0]  # drop the innermost scope
+        for pref in ("class", "struct", "union"):
+            cand = f"{pref}{rest}.html"
+            if (api_dir / cand).is_file():
+                return cand
+    return ""
 
 
 def _inline_collaboration_svgs(api_dir: pathlib.Path,
@@ -22,10 +45,29 @@ def _inline_collaboration_svgs(api_dir: pathlib.Path,
         if "://" in path:
             return m.group(0)
         base = path.rsplit("/", 1)[-1]
-        if (api_dir / base).is_file():
-            return f'xlink:href="{base}"'
-        rel = path.lstrip("./")
-        return f'xlink:href="{DOXYGEN_BASE_URL}{rel}"'
+        page, _, frag = base.partition("#")   # split off the Doxygen anchor
+        # Resolve the Doxygen page to its Sphinx equivalent (class/struct pages
+        # keep their name; group/namespace pages are remapped). Whatever the
+        # original docs linked, ours links too — but into the NEW Sphinx docs.
+        local = _doxy_page_to_local(page)
+        if not (api_dir / local).is_file():
+            # Nested type with no own page -> link to the enclosing class page,
+            # where Sphinx documents it inline.
+            parent = _doxy_parent_page(page, api_dir)
+            if parent:
+                local = parent
+            # else: keep `local` as the resolved Sphinx page name even if it
+            # isn't generated in THIS build (e.g. contrib/CUDA not built, or the
+            # `_Tp` stub). Whatever the original docs made clickable stays
+            # clickable here and points into the NEW Sphinx docs — never back to
+            # docs.opencv.org.
+        # Jump to the exact member when we can map the Doxygen anchor to Sphinx's
+        # (lowercased-name) anchor — matching the original docs' behaviour. An
+        # unmapped/missing anchor degrades gracefully to the page top.
+        member = _DOXY_ANCHOR_TO_MEMBER.get(frag) if frag else None
+        if member:
+            return f'xlink:href="{local}#{member}"'
+        return f'xlink:href="{local}"'
 
     for html in api_dir.glob("*.html"):
         text = html.read_text(encoding="utf-8")

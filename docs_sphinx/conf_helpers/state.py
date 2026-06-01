@@ -173,6 +173,11 @@ _TAG_TITLES: dict[str, str] = {}
 # Bridges our XML-driven members to the HTML anchors that name the call/caller
 # graph SVGs (XML memberdef ids and HTML anchors live in disjoint hash spaces).
 _CALL_GRAPH_ANCHORS: dict[tuple[str, str, str], str] = {}
+# Doxygen member anchor (e.g. 'af2d2652…') -> Sphinx anchor (lowercased member
+# name). Lets diagram cross-links jump to the exact member in the Sphinx docs,
+# the way the original Doxygen pages did. Sphinx anchors members by plain
+# lowercased name (id="clone", id="updatecontinuityflag"), not the C++-v4 id.
+_DOXY_ANCHOR_TO_MEMBER: dict[str, str] = {}
 
 
 def _norm_args(arglist: str) -> str:
@@ -202,6 +207,8 @@ if _TAG_FILE.is_file():
                 _fstem = pathlib.Path(_faf).stem
                 _CALL_GRAPH_ANCHORS.setdefault(
                     (_fstem, _fn, _norm_args(_fm.findtext("arglist") or "")), _fan)
+                # Doxygen anchor -> Sphinx member anchor (lowercased name).
+                _DOXY_ANCHOR_TO_MEMBER.setdefault(_fan, _fn.lower())
             if _kind == "page":
                 _n, _f = _c.findtext("name"), _c.findtext("filename")
                 _t = _c.findtext("title")
@@ -322,18 +329,36 @@ _LOCAL_CLASS_URL: dict[str, str] = {
     "_Tp": "class_Tp.html",
 }
 _LOCAL_TYPEDEF_URL: dict[str, str] = {}  # 'uchar' -> 'core_hal_interface.html#_CPPv45uchar'
+# Template-parameter placeholder pages. Doxygen emits near-empty `class…` pages
+# for bare template params (e.g. `_Tp`, `float_type`); Sphinx generates matching
+# stubs (see stubs._write_placeholder_stubs) so diagram cross-links resolve to a
+# real page instead of 404ing. Maps Doxygen filename -> (display name, Sphinx page).
+_PLACEHOLDER_STUBS: dict[str, tuple[str, str]] = {
+    "class__Tp.html":        ("_Tp",        "class_Tp.html"),
+    "classfloat__type.html": ("float_type", "classfloat_type.html"),
+}
+# Doxygen compound filename -> Sphinx page filename, for class/struct compounds.
+# Lets diagram cross-links resolve to the Sphinx page even when its name differs
+# from Doxygen's (e.g. the `_Tp` stub: class__Tp.html -> class_Tp.html). Seeded
+# with the placeholder pages above; real classes are added from the tag file.
+_LOCAL_PAGE_BY_DOXY_FILE: dict[str, str] = {
+    _doxy: _page for _doxy, (_disp, _page) in _PLACEHOLDER_STUBS.items()}
 if _LOCAL_SRC_TAG.is_file():
     try:
         import xml.etree.ElementTree as _ET
         for _c in _ET.parse(str(_LOCAL_SRC_TAG)).getroot().iter("compound"):
-            if _c.get("kind") == "class":
+            if _c.get("kind") in ("class", "struct"):
                 _n = _c.findtext("name") or ""
                 _f = _c.findtext("filename") or ""
                 if _n and _f:
                     _short = _n.split("::")[-1]
                     _fn = _f if _f.endswith(".html") else _f + ".html"
-                    _LOCAL_CLASS_URL.setdefault(
-                        _short, pathlib.PurePosixPath(_fn).name)
+                    _doxy_base = pathlib.PurePosixPath(_fn).name
+                    _LOCAL_CLASS_URL.setdefault(_short, _doxy_base)
+                    # Sphinx mirrors Doxygen's class/struct filename, except for
+                    # the handful remapped in _LOCAL_CLASS_URL (e.g. _Tp).
+                    _LOCAL_PAGE_BY_DOXY_FILE.setdefault(
+                        _doxy_base, _LOCAL_CLASS_URL.get(_short, _doxy_base))
             for _mem in _c.findall("member"):
                 # variable only from namespaces; class-member vars poison the map
                 _mk = _mem.get("kind")
@@ -370,6 +395,26 @@ if _LOCAL_SRC_TAG.is_file():
                 _LOCAL_TYPEDEF_URL[_mn] = f"{_local_page}#{_anchor}"
     except Exception:
         pass
+
+
+def _doxy_page_to_local(basename: str) -> str:
+    """Map a Doxygen compound page filename to the Sphinx page documenting the
+    same symbol. Pure name transform — the caller verifies the file exists.
+
+    Mirrors the rules already used to build _LOCAL_TYPEDEF_URL above, so SVG
+    cross-links resolve into the new Sphinx docs instead of old Doxygen:
+        group__core__utils.html  -> core_utils.html
+        namespacecv*.html        -> core_basic.html
+        class*/struct*/union*    -> unchanged (Sphinx mirrors Doxygen's names)
+    """
+    if basename.startswith("group__"):
+        return (basename[len("group__"):].replace(".html", "")
+                .replace("__", "_") + ".html")
+    if basename.startswith("namespace"):
+        return "core_basic.html"
+    # class/struct: Sphinx mirrors the Doxygen filename, except the few remapped
+    # (e.g. the `_Tp` stub). Fall back to the same name when not in the map.
+    return _LOCAL_PAGE_BY_DOXY_FILE.get(basename, basename)
 
 
 # -- Class template-parameter display map (step 8e) -------------------------
@@ -822,9 +867,10 @@ __all__ = [
     "HAVE_SPHINX_DESIGN", "HAVE_BREATHE",
     "DOXYGEN_BASE_URL", "_doxygen_url",
     "_TAG_FILE", "_TAG_FILENAMES", "_TAG_TITLES", "_CV_SYMBOL_URL", "_FILE_URL",
-    "_CALL_GRAPH_ANCHORS", "_norm_args",
+    "_CALL_GRAPH_ANCHORS", "_DOXY_ANCHOR_TO_MEMBER", "_norm_args",
     "_LIVE_GROUP_URL", "_LIVE_CLASS_URL", "_LIVE_TYPEDEF_URL",
     "_LOCAL_CLASS_URL", "_LOCAL_TYPEDEF_URL", "_CLASS_TEMPLATE_DISPLAY",
+    "_LOCAL_PAGE_BY_DOXY_FILE", "_PLACEHOLDER_STUBS", "_doxy_page_to_local",
     "_func_slug",
     "_CITE_NUMBER", "_BIB_ENTRIES_SORTED", "_bib_render_all",
     "_REDIRECT_MAP", "_resolve_redirect",

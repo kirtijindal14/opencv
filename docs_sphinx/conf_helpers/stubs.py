@@ -1082,6 +1082,44 @@ def _write_class_stub(cls: dict, out_dir: pathlib.Path,
     _stub_write(out, "\n".join(lines))
 
 
+def _write_placeholder_stubs(out_dir: pathlib.Path,
+                             xml_dir: pathlib.Path) -> None:
+    """Stub pages for Doxygen's bare template-parameter classes (`_Tp`,
+    `float_type`). Doxygen renders near-empty `class…` pages for these (title +
+    collaboration diagram); we mirror that so diagram cross-links resolve instead
+    of 404ing. Same format as `_write_class_stub` (title + `opencv-class-brief` +
+    the legacy collaboration SVG); marked `orphan` since nothing toctrees them."""
+    html_root = xml_dir.parent / "html"
+    for _doxy_file, (_display, _page) in _PLACEHOLDER_STUBS.items():
+        stem = _page[:-5] if _page.endswith(".html") else _page       # 'class_Tp'
+        refid = _doxy_file[:-5] if _doxy_file.endswith(".html") else _doxy_file
+        # Mirror Doxygen's page exactly: "<name> Class Reference" title, the
+        # collaboration diagram, then the "generated from the following files"
+        # line (these synthetic template params have no source file list).
+        lines = [
+            "---",
+            "orphan: true",
+            "---",
+            "",
+            f"# {_display} Class Reference",
+            "",
+        ]
+        _svg = _find_collaboration_svg(refid, html_root)
+        if _svg is not None:
+            lines += _diagram_svg_lines(
+                _svg, out_dir,
+                f"Collaboration diagram for {_display}",
+                f"Collaboration diagram for {_display}:")
+        lines += [
+            "",
+            "The documentation for this class was generated from the "
+            "following files:",
+            "",
+        ]
+        _stub_write(out_dir / f"{stem}.md", "\n".join(lines))
+        _ANCHOR_TO_DOC[stem] = f"api/{stem}"
+
+
 def _generate_api_stubs(modules, xml_dir, out_dir):
     """Generate the api/ stub tree: group/namespace pages, then class pages."""
     if not modules:
@@ -1161,6 +1199,8 @@ def _generate_api_stubs(modules, xml_dir, out_dir):
     for cls in classes_seen.values():
         _write_class_stub(cls, out_dir, xml_dir)
         _ANCHOR_TO_DOC[cls["refid"]] = f"api/{_class_page_name(cls['refid'])}"
+    # Placeholder stubs for bare template params (_Tp, …) so diagram links resolve.
+    _write_placeholder_stubs(out_dir, xml_dir)
     _stub_write(out_dir / "api_root.markdown", "\n".join(root_lines) + "\n")
     # Sweep stale files.
     for _p in list(out_dir.iterdir()):
