@@ -2065,11 +2065,9 @@ _FALLBACK_MODULE_DATA: dict = {
         "title": "DNN used for object detection",
         "include": "opencv2/core_detect.hpp",
         "fn_include": "opencv2/core_detect.hpp",
-        "description":
-            "The dnn_objdetect module includes deep-neural-network utilities "
-            "for object detection, grouping the structures and bounding-box "
-            "handling required to run and post-process specialized object "
-            "localization models on top of the OpenCV DNN backend.",
+        # Real description (if any) comes from the source header; the original's
+        # is empty, so nothing is invented here.
+        "description": "",
         "classes": [
             ("class",  "cv::dnn_objdetect::InferBbox",
              "A class to post process model predictions."),
@@ -2083,12 +2081,7 @@ _FALLBACK_MODULE_DATA: dict = {
         "title": "Image Quality Analysis (IQA) API",
         "include": "opencv2/quality.hpp",
         "fn_include": "opencv2/quality/qualitybase.hpp",
-        "description":
-            "The quality module implements Image Quality Analysis (IQA) "
-            "metrics. It provides algorithms to compute objective image-quality "
-            "scores — full-reference metrics against a reference image, plus "
-            "the no-reference BRISQUE metric — behind a common QualityBase "
-            "interface.",
+        "description": "",
         "classes": [
             ("class", "cv::quality::QualityBase", ""),
         ],
@@ -2170,11 +2163,7 @@ _FALLBACK_MODULE_DATA: dict = {
         "title": "Ascend-accelerated Computer Vision",
         "include": "opencv2/cann.hpp",
         "fn_include": "opencv2/cann_interface.hpp",
-        "description": (
-            "This module provides Ascend-accelerated implementations of core "
-            "Computer-Vision operations, offloading element-wise arithmetic "
-            "and image-processing primitives to Huawei Ascend NPU hardware for "
-            "high-throughput acceleration."),
+        "description": "",
         "topics": ["Core part", "Operations for Ascend Backend."],
         "classes": [],
         "functions": [],
@@ -2192,11 +2181,632 @@ def _fallback_topic_name(module: str, topic: str) -> str:
     return f"{module}_" + re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_")
 
 
+def _doxy_block_to_myst(text: str) -> str:
+    """Convert a Doxygen `@defgroup` comment body to MyST markdown: `~~~` code
+    fences, `@note` blocks, `-#` numbered lists, `%Word` escapes, `@cite`/`@ref`.
+    These blocks are already mostly markdown, so the conversion is light."""
+    out: list = []
+    in_code = False
+    note: list = []
+    in_note = False
+
+    def _flush_note():
+        nonlocal in_note, note
+        if in_note:
+            out.extend([":::{note}", *note, ":::", ""])
+            in_note, note = False, []
+
+    for raw in text.split("\n"):
+        st = raw.strip()
+        if st in ("@{", "@}"):
+            continue
+        if st.startswith("~~~") or st.startswith("```"):
+            _flush_note()
+            out.append("```")
+            in_code = not in_code
+            continue
+        if in_code:
+            out.append(raw)
+            continue
+        if st.startswith("@note"):
+            _flush_note()
+            in_note = True
+            rest = st[len("@note"):].strip()
+            if rest:
+                note.append(rest)
+            continue
+        if in_note:
+            if st == "":
+                _flush_note()
+                out.append("")
+            else:
+                note.append(raw.rstrip())
+            continue
+        m = re.match(r"^(\s*)-#\s+(.*)$", raw)
+        if m:
+            out.append(f"{m.group(1)}1. {m.group(2)}")
+            continue
+        s = raw.rstrip()
+        s = re.sub(r"(?<!\w)%(?=[A-Za-z])", "", s)        # no-autolink escape
+        s = re.sub(r"@cite\s+([\w:.\-]+)", r"[\1]", s)
+        s = re.sub(r"@ref\s+([\w:.\-]+)", r"\1", s)
+        out.append(s)
+    _flush_note()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+_SUBGROUP_DOCS_CACHE: dict = {}
+
+
+def _extract_subgroup_docs(module: str) -> dict:
+    """Read a module's real per-group docs straight from its source headers
+    (they exist there even with no Doxygen XML). Returns
+    `{title: {"desc": md, "classes": [(kind, qualified)], "enums": [(qualified,
+    [values])]}}` — the module intro and every topic. Cached per module.
+
+    `@defgroup <id> <Title>` gives the title + description; the classes/enums
+    declared inside that group's `@addtogroup <id> @{ … @}` blocks give its
+    Classes/Enumerations."""
+    if module in _SUBGROUP_DOCS_CACHE:
+        return _SUBGROUP_DOCS_CACHE[module]
+    root = CONTRIB_ROOT / module / "include"
+    id_title: dict = {}                 # group id -> title
+    info: dict = {}                     # title -> {desc, classes, enums}
+    members: dict = {}                  # group id -> {classes, enums}
+    if root.is_dir():
+        defpat = re.compile(
+            r"@defgroup\s+(\S+)\s+([^\n]+)\n(.*?)"
+            r"(?=@defgroup|@addtogroup|@\{|@\}|\*/)", re.S)
+        addpat = re.compile(r"@addtogroup\s+(\S+)(.*?)@\}", re.S)
+        clspat = re.compile(
+            r"\b(class|struct)\s+(?:CV_EXPORTS\w*\s+)?(\w+)(?=\s*[:{])")
+        enumpat = re.compile(r"\benum\s+(?:class\s+)?(\w+)\s*\{([^}]*)\}", re.S)
+        for hdr in sorted(root.rglob("*.hpp")):
+            try:
+                txt = hdr.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "@defgroup" not in txt and "@addtogroup" not in txt:
+                continue
+            nss = re.findall(r"\bnamespace\s+(\w+)", txt)
+            ns = "cv"
+            if "cv" in nss and nss.index("cv") + 1 < len(nss):
+                ns = "cv::" + nss[nss.index("cv") + 1]
+            for m in defpat.finditer(txt):
+                gid, title = m.group(1), m.group(2).strip()
+                id_title.setdefault(gid, title)
+                info.setdefault(title, {})["desc"] = _doxy_block_to_myst(m.group(3))
+            for m in addpat.finditer(txt):
+                gid, body = m.group(1), m.group(2)
+                mem = members.setdefault(gid, {"classes": [], "enums": []})
+                for cm in clspat.finditer(body):
+                    pair = (cm.group(1), f"{ns}::{cm.group(2)}")
+                    if pair not in mem["classes"]:
+                        mem["classes"].append(pair)
+                for em in enumpat.finditer(body):
+                    vals = [v.split("=")[0].strip()
+                            for v in em.group(2).split(",")
+                            if v.split("=")[0].strip()]
+                    mem["enums"].append((f"{ns}::{em.group(1)}", vals))
+    for gid, title in id_title.items():
+        rec = info.setdefault(title, {})
+        rec.setdefault("desc", "")
+        mem = members.get(gid, {})
+        rec["classes"] = mem.get("classes", [])
+        rec["enums"] = mem.get("enums", [])
+    _SUBGROUP_DOCS_CACHE[module] = info
+    return info
+
+
+_GROUP_TREE_CACHE: dict = {}
+
+
+def _parse_group_block(body: str, ns: str):
+    """Parse an `@addtogroup` block body into (classes, functions, enums):
+    class/struct definitions (kind, qualified, brief), free-function
+    declarations (ret, qualified, args, brief, params), enums (qualified,
+    [values]). Class bodies are recorded then skipped; only namespace-level free
+    functions are taken as functions."""
+    classes: list = []
+    functions: list = []
+    enums: list = []
+    i, n, doc = 0, len(body), None
+    while i < n:
+        if body[i] in " \t\r\n":
+            i += 1
+            continue
+        if body.startswith("/**", i) or body.startswith("/*!", i):
+            j = body.find("*/", i)
+            if j < 0:
+                break
+            doc, i = body[i:j + 2], j + 2
+            continue
+        if body.startswith("/*", i):
+            j = body.find("*/", i)
+            i = j + 2 if j >= 0 else n
+            continue
+        if body.startswith("//", i):
+            j = body.find("\n", i)
+            if body.startswith("//!", i):
+                doc = body[i:j if j >= 0 else n]
+            i = j if j >= 0 else n
+            continue
+        cm = re.match(
+            r"(class|struct)\s+(?:CV_EXPORTS\w*\s+)?(\w+)\s*(?::[^{;]*)?\{",
+            body[i:])
+        if cm:
+            brief, _ = _doxy_member_doc(doc) if doc else ("", [])
+            classes.append((cm.group(1), f"{ns}::{cm.group(2)}", brief))
+            d, p = 0, body.find("{", i)
+            while p < n:
+                if body[p] == "{":
+                    d += 1
+                elif body[p] == "}":
+                    d -= 1
+                    if d == 0:
+                        break
+                p += 1
+            q = body.find(";", p)
+            i = (q + 1) if (0 <= q <= p + 3) else (p + 1)
+            doc = None
+            continue
+        em = re.match(r"enum\s+(?:class\s+)?(\w+)\s*\{([^}]*)\}", body[i:], re.S)
+        if em:
+            vals = [v.split("=")[0].strip() for v in em.group(2).split(",")
+                    if v.split("=")[0].strip()]
+            enums.append((f"{ns}::{em.group(1)}", vals))
+            i += em.end()
+            doc = None
+            continue
+        start, p, dp, end = i, i, 0, -1
+        while p < n:
+            ch = body[p]
+            if ch == "(":
+                dp += 1
+            elif ch == ")":
+                dp -= 1
+            elif ch == "{" and dp == 0:
+                d = 0
+                while p < n:
+                    if body[p] == "{":
+                        d += 1
+                    elif body[p] == "}":
+                        d -= 1
+                        if d == 0:
+                            break
+                    p += 1
+                end = p
+                break
+            elif ch == ";" and dp == 0:
+                end = p
+                break
+            p += 1
+        if end < 0:
+            break
+        decl = " ".join(body[start:end].split())
+        i = end + 1
+        if "(" in decl and not decl.startswith(("friend", "using", "typedef")):
+            head, _, rest = decl.partition("(")
+            toks = [t for t in head.split() if not t.startswith("CV_EXPORTS")]
+            if toks:
+                brief, params = _doxy_member_doc(doc) if doc else ("", [])
+                functions.append((" ".join(toks[:-1]),
+                                  f"{ns}::{toks[-1].lstrip('*&')}",
+                                  "(" + rest, brief, params))
+        doc = None
+    return classes, functions, enums
+
+
+def _extract_group_tree(module: str) -> dict:
+    """Full nested group tree from a module's headers, honouring `@{`/`@}`
+    nesting so sub-topics (e.g. cannops' Core part -> Data Structures) are
+    captured. Returns `{gid: {title, desc, parent, classes, functions, enums,
+    include}}`; children are the gids whose `parent` is this gid. Each group's
+    classes/functions/enums come from its `@addtogroup` block(s). Cached."""
+    if module in _GROUP_TREE_CACHE:
+        return _GROUP_TREE_CACHE[module]
+    tree: dict = {}
+
+    def _node():
+        return {"title": "", "desc": "", "parent": None, "classes": [],
+                "functions": [], "enums": [], "include": ""}
+    root = CONTRIB_ROOT / module / "include"
+    if root.is_dir():
+        tok = re.compile(
+            r"@defgroup\s+(?P<gid>\S+)[ \t]+(?P<gtitle>[^\n]*)"
+            r"|@addtogroup\s+(?P<aid>\S+)|(?P<open>@\{)|(?P<close>@\})")
+        addpat = re.compile(r"@addtogroup\s+(\S+)(.*?)@\}", re.S)
+        for hdr in sorted(root.rglob("*.hpp")):
+            try:
+                txt = hdr.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "@defgroup" not in txt and "@addtogroup" not in txt:
+                continue
+            nss = re.findall(r"\bnamespace\s+(\w+)", txt)
+            ns = "cv"
+            if "cv" in nss and nss.index("cv") + 1 < len(nss):
+                ns = "cv::" + nss[nss.index("cv") + 1]
+            hp = str(hdr)
+            j = hp.find("opencv2/")
+            inc = hp[j:] if j >= 0 else hdr.name
+            # 1) structure (titles, descriptions, parent nesting)
+            ms = list(tok.finditer(txt))
+            stack: list = []
+            last = None
+            for idx, m in enumerate(ms):
+                if m.group("gid"):
+                    gid = m.group("gid")
+                    nxt = ms[idx + 1].start() if idx + 1 < len(ms) else len(txt)
+                    g = tree.setdefault(gid, _node())
+                    g["title"] = g["title"] or m.group("gtitle").strip()
+                    if not g["desc"]:
+                        g["desc"] = _doxy_block_to_myst(txt[m.end():nxt])
+                    if g["parent"] is None and stack:
+                        g["parent"] = stack[-1]
+                    last = gid
+                elif m.group("aid"):
+                    last = m.group("aid")
+                    tree.setdefault(last, _node())
+                elif m.group("open"):
+                    stack.append(last)
+                elif m.group("close") and stack:
+                    stack.pop()
+            # 2) members (classes/functions/enums) from @addtogroup blocks
+            for am in addpat.finditer(txt):
+                gid, blk = am.group(1), am.group(2)
+                g = tree.setdefault(gid, _node())
+                cls, fns, ens = _parse_group_block(blk, ns)
+                for c in cls:
+                    if c not in g["classes"]:
+                        g["classes"].append(c)
+                g["functions"] += fns
+                g["enums"] += ens
+                if (cls or fns) and not g["include"]:
+                    g["include"] = inc
+    _GROUP_TREE_CACHE[module] = tree
+    return tree
+
+
+def _linkify_desc(text: str, name_to_ref: dict) -> str:
+    """Linkify class names in a description's prose (e.g. reg's `Map`,
+    `MapperGradShift`) to their pages — like the original auto-linking. Longest
+    names first, at token boundaries, and never inside code spans / fenced code
+    / existing markdown links."""
+    if not text or not name_to_ref:
+        return text
+    pat = re.compile(
+        r"(?<![\w:])(" + "|".join(re.escape(n) for n in
+                                  sorted(name_to_ref, key=len, reverse=True))
+        + r")(?!\w)")
+
+    def _sub(seg: str) -> str:
+        return pat.sub(lambda m: f"[{m.group(1)}]({name_to_ref[m.group(1)]})",
+                       seg)
+    parts = re.split(r"(```[\s\S]*?```|`[^`]*`|\[[^\]]*\]\([^)]*\))", text)
+    return "".join(seg if i % 2 else _sub(seg)
+                   for i, seg in enumerate(parts))
+
+
+def _sig_url_map(sig: str, module_classes: list) -> dict:
+    """text -> relative `.html` for the types in a signature: this module's
+    classes (same dir) plus any tagged class (Mat, Ptr, …) resolvable via the
+    tagfile, so signature types are clickable like the original."""
+    urls: dict = {}
+    for kind, qual in module_classes:
+        ref = f"{_fallback_class_refid(kind, qual)}.html"
+        urls[qual] = ref
+        urls[qual.rsplit("::", 1)[-1]] = ref
+    for tok in set(re.findall(r"[A-Za-z_]\w*", sig)):
+        if tok in urls:
+            continue
+        base = _LOCAL_CLASS_URL.get(tok)
+        if base:
+            u = _rel_doc_url(base[:-5] if base.endswith(".html") else base)
+            if u:
+                urls[tok] = u
+    return urls
+
+
+def _doxy_member_doc(comment: str):
+    """(@brief text, [(param, desc)]) from a `/** … */` or `//! …` comment."""
+    if not comment:
+        return "", []
+    t = re.sub(r"^/\*[*!]|\*/$", "", comment).strip()
+    t = re.sub(r"(?m)^\s*\*\s?", "", t)
+    t = re.sub(r"(?m)^//!\s?", "", t)
+    bm = re.search(r"@brief\s+(.*?)(?=@param|@return|@note|@sa|$)", t, re.S)
+    brief = (bm.group(1) if bm else re.split(r"@param|@return|@note|@sa", t)[0])
+    brief = " ".join(brief.split())
+    params = [(pm.group(1), " ".join(pm.group(2).split()))
+              for pm in re.finditer(
+                  r"@param(?:\[[^\]]*\])?\s+(\S+)\s+(.*?)"
+                  r"(?=@param|@return|@note|@sa|$)", t, re.S)]
+    return brief, params
+
+
+def _parse_class_body(body: str, short: str, access: str) -> list:
+    """Scan a class body into members: functions/ctors/dtors (ret, name, args,
+    brief, params, access, static/virtual) and variables. Tolerant — anything
+    that doesn't parse cleanly is skipped."""
+    members: list = []
+    i, n = 0, len(body)
+    doc = None
+    while i < n:
+        c = body[i]
+        if c in " \t\r\n":
+            i += 1
+            continue
+        if body.startswith("/**", i) or body.startswith("/*!", i):
+            j = body.find("*/", i)
+            if j < 0:
+                break
+            doc = body[i:j + 2]
+            i = j + 2
+            continue
+        if body.startswith("/*", i):
+            j = body.find("*/", i)
+            i = j + 2 if j >= 0 else n
+            continue
+        if body.startswith("//", i):
+            j = body.find("\n", i)
+            if body.startswith("//!", i):
+                doc = body[i:j if j >= 0 else n]
+            i = j if j >= 0 else n
+            continue
+        am = re.match(r"(public|protected|private)\s*:", body[i:])
+        if am:
+            access = am.group(1)
+            i += am.end()
+            doc = None
+            continue
+        nm = re.match(r"(template\s*<[^>]*>\s*)?(class|struct|union|enum)\b",
+                      body[i:])
+        if nm:                       # nested type: skip its body + trailing ;
+            k = body.find("{", i)
+            if k < 0:
+                q = body.find(";", i)
+                i = q + 1 if q >= 0 else n
+                doc = None
+                continue
+            d, p = 0, k
+            while p < n:
+                if body[p] == "{":
+                    d += 1
+                elif body[p] == "}":
+                    d -= 1
+                    if d == 0:
+                        break
+                p += 1
+            q = body.find(";", p)
+            i = q + 1 if q >= 0 else p + 1
+            doc = None
+            continue
+        # A declaration: read to ';' at paren-depth 0 (skip inline `{…}` body).
+        start, p, dp, end = i, i, 0, -1
+        while p < n:
+            ch = body[p]
+            if ch == "(":
+                dp += 1
+            elif ch == ")":
+                dp -= 1
+            elif ch == "{" and dp == 0:
+                d = 0
+                while p < n:
+                    if body[p] == "{":
+                        d += 1
+                    elif body[p] == "}":
+                        d -= 1
+                        if d == 0:
+                            break
+                    p += 1
+                end = p
+                break
+            elif ch == ";" and dp == 0:
+                end = p
+                break
+            p += 1
+        if end < 0:
+            break
+        decl = " ".join(body[start:end].split())
+        i = end + 1
+        _add_class_member(members, decl, doc, short, access)
+        doc = None
+    return members
+
+
+def _add_class_member(members: list, decl: str, doc, short: str, access: str):
+    if not decl or decl.startswith("friend"):
+        return
+    brief, params = _doxy_member_doc(doc) if doc else ("", [])
+    # Type aliases -> Member Typedef Documentation.
+    if decl.startswith("typedef ") or decl.startswith("using "):
+        um = re.match(r"using\s+(\w+)\s*=\s*(.+)$", decl)
+        if um:
+            members.append({"kind": "typedef", "name": um.group(1),
+                            "type": um.group(2).strip(), "brief": brief,
+                            "access": access})
+        else:
+            toks = decl[len("typedef "):].split()
+            if len(toks) >= 2:
+                members.append({"kind": "typedef",
+                                "name": toks[-1].lstrip("*&"),
+                                "type": " ".join(toks[:-1]), "brief": brief,
+                                "access": access})
+        return
+    if "(" in decl:
+        head, _, rest = decl.partition("(")
+        toks = head.split()
+        if not toks:
+            return
+        name = toks[-1].lstrip("*&")
+        ret = " ".join(toks[:-1])
+        kind = ("ctor" if name == short
+                else "dtor" if name == "~" + short else "function")
+        members.append({"kind": kind, "ret": ret, "name": name,
+                        "args": "(" + rest, "brief": brief, "params": params,
+                        "access": access, "static": "static" in toks,
+                        "virtual": "virtual" in toks})
+    else:
+        toks = decl.split()
+        if len(toks) >= 2 and re.match(r"^[A-Za-z_]\w*$", toks[-1].lstrip("*&")):
+            members.append({"kind": "var", "type": " ".join(toks[:-1]),
+                            "name": toks[-1].lstrip("*&"), "brief": brief,
+                            "access": access})
+
+
+def _extract_class_doc(module: str, qualified: str):
+    """Find `qualified`'s declaration in the module's headers and parse it into
+    {kind, brief, members}. Returns None if not found / unreadable."""
+    short = qualified.rsplit("::", 1)[-1]
+    root = CONTRIB_ROOT / module / "include"
+    if not root.is_dir():
+        return None
+    decl_re = re.compile(
+        r"\b(class|struct)\s+(?:CV_EXPORTS\w*\s+)?" + re.escape(short)
+        + r"\b\s*(?::[^{;]*)?\{")
+    for hdr in sorted(root.rglob("*.hpp")):
+        try:
+            txt = hdr.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        m = decl_re.search(txt)
+        if not m:
+            continue
+        kind = m.group(1)
+        s = m.end() - 1                      # at '{'
+        d, p, n = 0, s, len(txt)
+        while p < n:
+            if txt[p] == "{":
+                d += 1
+            elif txt[p] == "}":
+                d -= 1
+                if d == 0:
+                    break
+            p += 1
+        body = txt[s + 1:p]
+        cbrief = ""
+        # The single `/** … */` immediately before the class (no nested `*/`).
+        bm = re.search(r"/\*\*((?:(?!\*/)[\s\S])*?)\*/\s*$", txt[:m.start()])
+        if bm:
+            cbrief, _ = _doxy_member_doc("/**" + bm.group(1) + "*/")
+        try:
+            members = _parse_class_body(
+                body, short, "public" if kind == "struct" else "private")
+        except Exception:
+            members = []
+        return {"kind": kind, "brief": cbrief, "members": members}
+    return None
+
+
+def _render_class_member(qualified: str, m: dict, class_list: list) -> list:
+    """One member-detail block: signature (with clickable types + a protected
+    badge) + brief + params."""
+    _paren = "()" if m["kind"] in ("ctor", "dtor", "function") else ""
+    out = [f"### {m['name']}{_paren}", ""]
+    if m["kind"] == "var":
+        sig = f"{m.get('type', '')} {qualified}::{m['name']}".strip()
+    elif m["kind"] == "typedef":
+        sig = f"typedef {m.get('type', '')} {qualified}::{m['name']}".strip()
+    else:
+        pre = ("static " if m.get("static") else "") \
+            + ("virtual " if m.get("virtual") else "")
+        ret = m.get("ret", "")
+        sig = f"{pre}{ret + ' ' if ret else ''}{qualified}::{m['name']}{m['args']}"
+    html = _sig_html_with_links(sig, _sig_url_map(sig, class_list))
+    if html is not None:
+        out += ["{.opencv-api-sig}",
+                f'<code class="docutils literal notranslate">{html}</code>', ""]
+    else:
+        out += ["{.opencv-api-sig}", f"`{sig}`", ""]
+    if m.get("access") == "protected":
+        out += ["{bdg-secondary}`protected`", ""]
+    if m.get("brief"):
+        out += [m["brief"], ""]
+    if m.get("params"):
+        out += ["**Parameters**", ""]
+        out += [f"- `{pn}` — {_md_escape_cell(pd)}" for pn, pd in m["params"]]
+        out += [""]
+    return out
+
+
+def _render_class_subpage(module: str, kind: str, qualified: str,
+                          parent_link: str, class_list: list) -> str:
+    """Full class page from the header: brief + Detailed Description +
+    Constructor & Destructor / Member Function / Member Data / Member Typedef
+    Documentation. Types are linked, protected members badged. Falls back to a
+    minimal page when the header can't be parsed."""
+    info = _extract_class_doc(module, qualified)
+    lines = [f"# {kind.capitalize()} {qualified}", ""]
+    brief = (info or {}).get("brief", "")
+    if brief:
+        lines += [brief, ""]
+    lines += ["## Detailed Description", ""]
+    if brief:
+        lines += [brief, ""]
+    members = (info or {}).get("members", [])
+    ctors = [m for m in members if m["kind"] in ("ctor", "dtor")]
+    funcs = [m for m in members if m["kind"] == "function"]
+    typedefs = [m for m in members if m["kind"] == "typedef"]
+    vars_ = [m for m in members if m["kind"] == "var"]
+    for section, items in (("Constructor & Destructor Documentation", ctors),
+                           ("Member Typedef Documentation", typedefs),
+                           ("Member Function Documentation", funcs),
+                           ("Member Data Documentation", vars_)):
+        if items:
+            lines += [f"## {section}", ""]
+            for m in items:
+                lines += _render_class_member(qualified, m, class_list)
+    lines += [parent_link, ""]
+    return "\n".join(lines)
+
+
 def _fallback_class_refid(kind: str, qualified: str) -> str:
     """Doxygen-style page stem for a class/struct (e.g.
     `classcv_1_1datasets_1_1Dataset`) so the class link mirrors the convention."""
     pfx = kind if kind in ("class", "struct", "union") else "class"
     return pfx + qualified.replace("::", "_1_1")
+
+
+def _render_funcs(funcs: list, prefix: str, fn_include, class_list: list) -> list:
+    """Functions summary table + Function Documentation blocks. Each func is
+    (ret, qualified, args, brief[, params]); names link to in-page anchors,
+    types are linked, and each detail shows its `#include`."""
+    if not funcs:
+        return []
+    lines = ["## Functions", "", "{.api-reference-table .api-function-table}",
+             "| Return | Name | Description |", "|---|---|---|"]
+    for i, f in enumerate(funcs):
+        lines.append(f"| `{_md_escape_cell(f[0])}` | "
+                     f"[`{f[1]}`](#{prefix}-{i}) | {_md_escape_cell(f[3])} |")
+    lines += ["", "## Function Documentation", ""]
+    href = _include_page_href(fn_include) if fn_include else None
+    for i, f in enumerate(funcs):
+        ret, qual, args, brief = f[0], f[1], f[2], f[3]
+        params = f[4] if len(f) > 4 else []
+        sig = f"{ret + ' ' if ret else ''}{qual}{args}"
+        html = _sig_html_with_links(sig, _sig_url_map(sig, class_list))
+        lines += [f"({prefix}-{i})=", f"### {qual.rsplit('::', 1)[-1]}()", ""]
+        if html is not None:
+            lines += ["{.opencv-api-sig}",
+                      f'<code class="docutils literal notranslate">{html}</code>',
+                      ""]
+        else:
+            lines += ["{.opencv-api-sig}", f"`{sig}`", ""]
+        if href:
+            lines += [
+                "{.opencv-api-include}",
+                f'<code class="docutils literal notranslate">'
+                f'#include &lt;<a class="reference external '
+                f'opencv-include-link" href="{href}">{fn_include}</a>&gt;</code>',
+                ""]
+        if brief:
+            lines += [brief, ""]
+        if params:
+            lines += ["**Parameters**", ""]
+            lines += [f"- `{pn}` — {_md_escape_cell(pd)}" for pn, pd in params]
+            lines += [""]
+    return lines
 
 
 def _render_fallback_body(name: str, d: dict) -> str:
@@ -2205,59 +2815,69 @@ def _render_fallback_body(name: str, d: dict) -> str:
     Documentation. Every link is a working `#include` file page, a generated
     topic/class subpage, or an in-page anchor — so nothing 404s."""
     lines: list = []
-    topics = d.get("topics") or []
+    topics = d.get("topics") or []         # [(gid, title)]
     classes = d.get("classes") or []
     funcs = d.get("functions") or []
     if topics:
         lines += ["## Topics", ""]
-        lines += [f"- [{t}](#api_{_fallback_topic_name(name, t)})"
-                  for t in topics] + [""]
+        lines += [f"- [{ttl}](#api_{gid})" for gid, ttl in topics] + [""]
+    # Always emit the heading (the real group pages show it even when empty).
+    lines += ["## Detailed Description", ""]
     if d.get("description"):
-        lines += ["## Detailed Description", "", d["description"], ""]
+        lines += [d["description"], ""]
     if classes:
         lines += ["## Classes", "", "{.api-reference-table}",
                   "| Name | Description |", "|---|---|"]
         for kind, qual, brief in classes:
             page = _fallback_class_refid(kind, qual)
-            link = f"[`{kind} {qual}`]({page}.md)"
-            # "More…" links to the class page's detail, as on the real pages —
-            # only where there's a brief (matching Doxygen).
-            desc = _md_escape_cell(brief)
-            if brief:
-                desc += f" [More…]({page}.md#detailed-description)"
-            lines.append(f"| {link} | {desc or chr(0xa0)} |")
+            # Plain row; translate's _rewrite_class_row splits the kind column
+            # and appends the "More..." link (only when there's a brief).
+            lines.append(f"| [`{kind} {qual}`]({page}.md) | "
+                         f"{_md_escape_cell(brief)} |")
         lines += [""]
-    if funcs:
-        lines += ["## Functions", "",
-                  "{.api-reference-table .api-function-table}",
-                  "| Return | Name | Description |", "|---|---|---|"]
-        for i, (ret, qual, _args, brief) in enumerate(funcs):
-            anc = _fallback_fn_anchor(name, i)
-            lines.append(f"| `{_md_escape_cell(ret)}` | "
-                         f"[`{qual}`](#{anc}) | {_md_escape_cell(brief)} |")
-        lines += [""]
-    if funcs:
-        lines += ["## Function Documentation", ""]
-        fn_inc = d.get("fn_include") or d.get("include")
-        href = _include_page_href(fn_inc) if fn_inc else None
-        for i, (ret, qual, args, brief) in enumerate(funcs):
-            short = qual.rsplit("::", 1)[-1]
-            lines += [f"({_fallback_fn_anchor(name, i)})=",
-                      f"### {short}()", "",
-                      "{.opencv-api-sig}", f"`{ret} {qual}{args}`", ""]
-            if href:
-                lines += [
-                    "{.opencv-api-include}",
-                    f'<code class="docutils literal notranslate">'
-                    f'#include &lt;<a class="reference external '
-                    f'opencv-include-link" href="{href}">{fn_inc}</a>&gt;</code>',
-                    ""]
-            if brief:
-                lines += [brief, ""]
+    lines += _render_funcs(funcs, f"api-fn-{name}",
+                           d.get("fn_include") or d.get("include"),
+                           d.get("class_list") or [])
     # Hidden toctree registers the topic + class subpages in the sidebar nav
     # (and avoids "not in any toctree" warnings); the lists above link to them.
-    toc = [_fallback_topic_name(name, t) for t in topics]
+    toc = [gid for gid, _ in topics]
     toc += [_fallback_class_refid(k, q) for k, q, _b in classes]
+    if toc:
+        lines += ["```{toctree}", ":hidden:", ""] + toc + ["```", ""]
+    return "\n".join(lines)
+
+
+def _render_subgroup_page(gid: str, tree: dict, module: str, module_title: str,
+                          class_list: list, prose_refs: dict) -> str:
+    """A subgroup page: parent link + Topics (its child groups) + Detailed
+    Description + Classes + Enumerations — recursively mirroring Doxygen."""
+    g = tree[gid]
+    kids = [c for c in tree if tree[c].get("parent") == gid]
+    lines = [f"# {g['title']} {{#api_{gid}}}", "",
+             f"[{module_title}](#api_{module})", ""]
+    toc: list = list(kids)
+    if kids:
+        lines += ["## Topics", ""]
+        lines += [f"- [{tree[c]['title']}](#api_{c})" for c in kids] + [""]
+    lines += ["## Detailed Description", ""]
+    if g.get("desc"):
+        lines += [_linkify_desc(g["desc"], prose_refs), ""]
+    if g.get("classes"):
+        lines += ["## Classes", "", "{.api-reference-table}",
+                  "| Name | Description |", "|---|---|"]
+        for kind, qual, brief in g["classes"]:
+            cref = _fallback_class_refid(kind, qual)
+            toc.append(cref)
+            lines.append(f"| [`{kind} {qual}`]({cref}.md) | "
+                         f"{_md_escape_cell(brief)} |")
+        lines += [""]
+    lines += _render_funcs(g.get("functions") or [], f"api-fn-{gid}",
+                           g.get("include"), class_list)
+    if g.get("enums"):
+        lines += ["## Enumerations", ""]
+        for ename, vals in g["enums"]:
+            body = ",\n".join(f"    {v}" for v in vals)
+            lines += ["```cpp", f"enum {ename} {{", body, "}", "```", ""]
     if toc:
         lines += ["```{toctree}", ":hidden:", ""] + toc + ["```", ""]
     return "\n".join(lines)
@@ -2279,21 +2899,53 @@ def _fallback_module_tree(name: str):
         return None
     title = d["title"]
     back = f"Part of the [{title}](#api_{name}) module."
+    # Full nested group tree from the headers (module -> topics -> sub-topics …).
+    tree = _extract_group_tree(name)
+
+    def _children(gid):
+        return [c for c in tree if tree[c].get("parent") == gid]
+
+    # Every class in the module (module-level hardcoded + every group's), for
+    # linking class names in prose and types in signatures.
+    class_list: list = [(k, q) for k, q, *_ in (d.get("classes") or [])]
+    for g in tree.values():
+        class_list += [(k, q) for k, q, *_ in g["classes"]]
+    _seen: set = set()
+    class_list = [c for c in class_list if not (c in _seen or _seen.add(c))]
+    prose_refs: dict = {}
+    for k, q in class_list:
+        ref = f"{_fallback_class_refid(k, q)}.md"
+        prose_refs.setdefault(q, ref)
+        prose_refs.setdefault(q.rsplit("::", 1)[-1], ref)
+    # Module intro from the headers (empty where the source is empty).
+    mdesc = _linkify_desc(
+        tree.get(name, {}).get("desc") or d.get("description") or "", prose_refs)
+    eff = dict(d)
+    eff["description"] = mdesc
+    eff["class_list"] = class_list
+    eff["topics"] = [(g, tree[g]["title"]) for g in _children(name)]
     child_pages: list = []
-    # Topic subpages (linked from the Topics list).
-    for t in (d.get("topics") or []):
-        cn = _fallback_topic_name(name, t)
-        child_pages.append((cn, "\n".join(
-            [f"# {t} {{#api_{cn}}}", "", back, ""])))
-    # Class/struct subpages (linked from the Classes table; the brief lives
-    # under a Detailed Description heading so it reads like a class page).
+
+    def _emit_class(kind, qual, parent_link):
+        child_pages.append((_fallback_class_refid(kind, qual),
+                            _render_class_subpage(name, kind, qual,
+                                                  parent_link, class_list)))
+
+    # Recursively emit a page for every subgroup (Topics -> Desc -> Classes ->
+    # Enumerations), plus each group's class subpages.
+    def _walk(gid):
+        child_pages.append((gid, _render_subgroup_page(
+            gid, tree, name, title, class_list, prose_refs)))
+        for kind, qual, _brief in tree[gid]["classes"]:
+            _emit_class(kind, qual,
+                        f"Part of [{tree[gid]['title']}](#api_{gid}).")
+        for c in _children(gid):
+            _walk(c)
+    for c in _children(name):
+        _walk(c)
+    # Module-level class subpages (the hardcoded ones, e.g. Dataset, InferBbox).
     for kind, qual, brief in (d.get("classes") or []):
-        crefid = _fallback_class_refid(kind, qual)
-        child_pages.append((crefid, "\n".join(
-            [f"# {kind.capitalize()} {qual}", "",
-             (brief or ""), "",
-             "## Detailed Description", "",
-             (brief or f"`{qual}` reference."), "", back, ""])))
+        _emit_class(kind, qual, back)
     return {
         "name": name,            # single-underscore group name -> page & anchor
         "title": title,
@@ -2302,7 +2954,7 @@ def _fallback_module_tree(name: str):
         "sections": {},
         "children": [],
         "child_pages": child_pages,
-        "body_md": _render_fallback_body(name, d),
+        "body_md": _render_fallback_body(name, eff),
     }
 
 

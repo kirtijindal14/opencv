@@ -475,8 +475,8 @@ def _translate(text: str, docname: str | None = None) -> str:
             tparams = _CLASS_TEMPLATE_DISPLAY.get(short, "")
             link_label = f"{name}{tparams}"
             more = (f'<a class="opencv-class-more" '
-                    f'href="{page}.html#detailed-description">View details</a>')
-            desc_out = f"{desc} {more}" if desc else more
+                    f'href="{page}.html#detailed-description">More...</a>')
+            desc_out = f"{desc} {more}" if desc else ""
             return (f"| `{kind}` [`{link_label}`]({page}.md) "
                     f"| {desc_out} |")
         text = re.sub(
