@@ -191,7 +191,12 @@ DOXYGEN_BASE_URL = (
     .rstrip("/") + "/")
 # First existing wins; env OPENCV_DOXYGEN_TAGFILE overrides
 _TAG_CANDIDATES = (
-    # Track cmake's actual build dir via the XML dir.
+    # Highest priority: the tag file that belongs to the SAME build as the
+    # Doxygen XML the run was pointed at (OPENCV_DOXYGEN_XML_DIR). This keeps
+    # _TAG_FILE / _FILE_URL consistent with the XML regardless of the build-dir
+    # name (e.g. build_pr50), so #include links resolve without anyone having to
+    # set OPENCV_DOXYGEN_TAGFILE by hand.  Track cmake's actual build dir via
+    # the XML dir.
     _API_XML_DIR.parent / "html" / "opencv.tag",
     _API_XML_DIR.parent / "opencv.tag",
     HERE.parent / "build" / "doc" / "doxygen" / "html" / "opencv.tag",
