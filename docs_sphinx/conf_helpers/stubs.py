@@ -587,7 +587,8 @@ def _namespaces_section(entries: list) -> list[str]:
 def _write_namespace_stub(ns: dict, out_dir: pathlib.Path,
                           xml_dir: pathlib.Path,
                           ns_group_map: dict | None = None,
-                          group_info: dict | None = None) -> tuple[str, str]:
+                          group_info: dict | None = None,
+                          classes_seen: dict | None = None) -> tuple[str, str]:
     """Write namespace_<slug>.md under out_dir. Returns (anchor, fname)."""
     import xml.etree.ElementTree as _ET
     slug = ns["name"].replace("::", "__")
@@ -2084,6 +2085,20 @@ _FALLBACK_MODULE_DATA: dict = {
         "description": "",
         "classes": [
             ("class", "cv::quality::QualityBase", ""),
+            ("class", "cv::quality::QualityBRISQUE",
+             "BRISQUE (Blind/Referenceless Image Spatial Quality Evaluator) is "
+             "a No Reference Image Quality Assessment (NR-IQA) algorithm."),
+            ("class", "cv::quality::QualityGMSD",
+             "Full reference GMSD algorithm"),
+            ("class", "cv::quality::QualityMSE",
+             "Full reference mean square error algorithm  "
+             "https://en.wikipedia.org/wiki/Mean_squared_error"),
+            ("class", "cv::quality::QualityPSNR",
+             "Full reference peak signal to noise ratio (PSNR) algorithm  "
+             "https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio"),
+            ("class", "cv::quality::QualitySSIM",
+             "Full reference structural similarity algorithm  "
+             "https://en.wikipedia.org/wiki/Structural_similarity"),
         ],
         "functions": [],
     },
@@ -2228,7 +2243,9 @@ def _doxy_block_to_myst(text: str) -> str:
             continue
         s = raw.rstrip()
         s = re.sub(r"(?<!\w)%(?=[A-Za-z])", "", s)        # no-autolink escape
-        s = re.sub(r"@cite\s+([\w:.\-]+)", r"[\1]", s)
+        # Leave `@cite KEY` intact: the source-read engine (translate._translate)
+        # converts it to the numbered citelist link with the correct relative
+        # depth — the same proven path used across all other docs.
         s = re.sub(r"@ref\s+([\w:.\-]+)", r"\1", s)
         out.append(s)
     _flush_note()
@@ -2328,7 +2345,11 @@ def _parse_group_block(body: str, ns: str):
         if body.startswith("//", i):
             j = body.find("\n", i)
             if body.startswith("//!", i):
-                doc = body[i:j if j >= 0 else n]
+                _c = body[i + 3:j if j >= 0 else n].strip()
+                # Structural Doxygen commands (`@addtogroup`, `@{`, `@}`, …) are
+                # not briefs — don't let them become the next decl's brief.
+                if not re.match(r"@(addtogroup|defgroup|ingroup|name|\{|\})", _c):
+                    doc = body[i:j if j >= 0 else n]
             i = j if j >= 0 else n
             continue
         cm = re.match(
@@ -2441,7 +2462,14 @@ def _extract_group_tree(module: str) -> dict:
                     g = tree.setdefault(gid, _node())
                     g["title"] = g["title"] or m.group("gtitle").strip()
                     if not g["desc"]:
-                        g["desc"] = _doxy_block_to_myst(txt[m.end():nxt])
+                        # Description ends at the comment close `*/`; never run
+                        # past it into the source (namespace/decls) even when the
+                        # next @-token is further down.
+                        seg = txt[m.end():nxt]
+                        _e = seg.find("*/")
+                        if _e != -1:
+                            seg = seg[:_e]
+                        g["desc"] = _doxy_block_to_myst(seg)
                     if g["parent"] is None and stack:
                         g["parent"] = stack[-1]
                     last = gid
@@ -2551,7 +2579,11 @@ def _parse_class_body(body: str, short: str, access: str) -> list:
         if body.startswith("//", i):
             j = body.find("\n", i)
             if body.startswith("//!", i):
-                doc = body[i:j if j >= 0 else n]
+                _c = body[i + 3:j if j >= 0 else n].strip()
+                # Structural Doxygen commands (`@addtogroup`, `@{`, `@}`, …) are
+                # not briefs — don't let them become the next decl's brief.
+                if not re.match(r"@(addtogroup|defgroup|ingroup|name|\{|\})", _c):
+                    doc = body[i:j if j >= 0 else n]
             i = j if j >= 0 else n
             continue
         am = re.match(r"(public|protected|private)\s*:", body[i:])
@@ -2674,6 +2706,24 @@ def _extract_class_doc(module: str, qualified: str):
         if not m:
             continue
         kind = m.group(1)
+        # Base classes from the `: public Foo, public Bar` clause (for the
+        # collaboration/inheritance diagram). Simple bases only; template bases
+        # are reduced to their leaf name.
+        bases: list = []
+        _decl = m.group(0)
+        _ci = _decl.find(":")
+        if _ci != -1:
+            _clause = _decl[_ci + 1:].rstrip("{ \t").strip()
+            for _part in _clause.split(","):
+                _toks = [t for t in _part.replace("virtual", " ").split()
+                         if t not in ("public", "protected", "private")]
+                if _toks:
+                    _bn = _toks[-1].split("<")[0].strip().rsplit("::", 1)[-1]
+                    if _bn:
+                        bases.append(_bn)
+        _sp = str(hdr)
+        _k = _sp.find("/include/")
+        include = _sp[_k + len("/include/"):] if _k != -1 else hdr.name
         s = m.end() - 1                      # at '{'
         d, p, n = 0, s, len(txt)
         while p < n:
@@ -2695,7 +2745,8 @@ def _extract_class_doc(module: str, qualified: str):
                 body, short, "public" if kind == "struct" else "private")
         except Exception:
             members = []
-        return {"kind": kind, "brief": cbrief, "members": members}
+        return {"kind": kind, "brief": cbrief, "members": members,
+                "bases": bases, "include": include}
     return None
 
 
@@ -2730,6 +2781,114 @@ def _render_class_member(qualified: str, m: dict, class_list: list) -> list:
     return out
 
 
+def _class_collab_svg(module: str, kind: str, qualified: str, info: dict,
+                      class_list: list):
+    """Build a Doxygen-style collaboration/inheritance diagram for `qualified`
+    with graphviz `dot`, since Doxygen emitted no graph for this module. The
+    class is drawn together with its (transitive) base classes ABOVE it and its
+    (transitive) subclasses BELOW it — each a UML record box of class name over
+    its public member list, joined by hollow inheritance arrows. The class
+    itself is shaded like the original. Box links point at the sibling Sphinx
+    class pages and are rewritten by the build-finished step. Writes
+    `<refid>__coll.svg` to `_API_OUT_DIR` and returns it, or None (lone class /
+    dot unavailable / write error)."""
+    import subprocess, hashlib as _hl
+    if _API_OUT_DIR is None:
+        return None
+    ns = qualified.rsplit("::", 1)[0] if "::" in qualified else ""
+
+    def _qual(short: str) -> str:
+        return f"{ns}::{short}" if ns and "::" not in short else short
+
+    # Cache class-doc lookups; map every module class to its base qualnames.
+    _info_cache: dict = {qualified: info}
+
+    def _ci(q: str):
+        if q not in _info_cache:
+            _info_cache[q] = _extract_class_doc(module, q)
+        return _info_cache[q]
+
+    base_of: dict = {}                      # qual -> [base qual,...] (in module)
+    in_module = {q for _k, q in (class_list or [])} | {qualified}
+    for q in in_module:
+        bs = [_qual(b) for b in (_ci(q) or {}).get("bases", [])]
+        base_of[q] = [b for b in bs if b in in_module]
+
+    # Ancestors (walk up) + descendants (walk down) of `qualified`, no siblings.
+    nodes = {qualified}
+    frontier = [qualified]
+    while frontier:                          # upward
+        x = frontier.pop()
+        for b in base_of.get(x, []):
+            if b not in nodes:
+                nodes.add(b)
+                frontier.append(b)
+    frontier = [qualified]
+    while frontier:                          # downward
+        x = frontier.pop()
+        for q in in_module:
+            if x in base_of.get(q, []) and q not in nodes:
+                nodes.add(q)
+                frontier.append(q)
+    if len(nodes) <= 1:
+        return None
+
+    def _esc(t: str) -> str:
+        for ch in "{}|<>\"":
+            t = t.replace(ch, "\\" + ch)
+        return t
+
+    def _box(q: str) -> str:
+        names, seen = [], set()
+        for m in (_ci(q) or {}).get("members", []):
+            if (m["kind"] in ("ctor", "dtor", "function")
+                    and m.get("access") == "public"):
+                lbl = m["name"] + "()"
+                if lbl not in seen:
+                    seen.add(lbl)
+                    names.append(lbl)
+        body = "".join(f"+ {_esc(n)}\\l" for n in names)
+        return "{" + _esc(q) + "|" + body + "}"
+
+    def _nid(s):
+        return "n" + _hl.md5(s.encode("utf-8")).hexdigest()[:10]
+    dot = [
+        'digraph "coll" {',
+        '  bgcolor="transparent";',
+        '  edge [dir="back", color="#1868b4", arrowtail="empty", arrowsize="0.9"];',
+        '  node [shape=record, style=filled, fillcolor="white", color="#3f3f3f",'
+        ' fontname="Helvetica", fontsize="10", margin="0.11,0.04"];',
+        '  rankdir="BT";',                       # derived at bottom, base on top
+    ]
+    for q in sorted(nodes):
+        if q == qualified:
+            attrs = f'label="{_box(q)}", fillcolor="#bfbfbf"'   # the class itself
+        else:
+            k = (_ci(q) or {}).get("kind", "class")
+            attrs = f'label="{_box(q)}", URL="{_fallback_class_refid(k, q)}.html"'
+        dot.append(f"  {_nid(q)} [{attrs}];")
+    # Inheritance edges: base -> derived (drawn back so the open arrow points up).
+    for q in sorted(nodes):
+        for b in base_of.get(q, []):
+            if b in nodes:
+                dot.append(f"  {_nid(b)} -> {_nid(q)};")
+    dot.append("}")
+    try:
+        res = subprocess.run(["dot", "-Tsvg"],
+                             input="\n".join(dot).encode("utf-8"),
+                             capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0 or not res.stdout:
+        return None
+    svg_path = _API_OUT_DIR / f"{_fallback_class_refid(kind, qualified)}__coll.svg"
+    try:
+        svg_path.write_bytes(res.stdout)
+    except OSError:
+        return None
+    return svg_path
+
+
 def _render_class_subpage(module: str, kind: str, qualified: str,
                           parent_link: str, class_list: list) -> str:
     """Full class page from the header: brief + Detailed Description +
@@ -2741,6 +2900,20 @@ def _render_class_subpage(module: str, kind: str, qualified: str,
     brief = (info or {}).get("brief", "")
     if brief:
         lines += [brief, ""]
+    inc = (info or {}).get("include")
+    if inc:
+        lines += ["```cpp", f"#include <{inc}>", "```", ""]
+    csvg = _class_collab_svg(module, kind, qualified, info or {}, class_list)
+    if csvg is not None:
+        lines += _diagram_svg_lines(
+            csvg, _API_OUT_DIR,
+            f"Collaboration diagram for {qualified}",
+            f"Collaboration diagram for {qualified}:")
+        if csvg.parent == _API_OUT_DIR:        # intermediate raw SVG; drop it
+            try:
+                csvg.unlink()
+            except OSError:
+                pass
     lines += ["## Detailed Description", ""]
     if brief:
         lines += [brief, ""]
@@ -3056,7 +3229,8 @@ def _generate_api_stubs(modules, xml_dir, out_dir,
                 anchor = f"api_ns_{ns['name'].replace('::', '__')}"
                 if ns["name"] not in written_ns:
                     _write_namespace_stub(ns, out_dir, xml_dir,
-                                          global_ns_group_map, global_group_info)
+                                          global_ns_group_map, global_group_info,
+                                          classes_seen)
                     written_ns.add(ns["name"])
                     _ALL_NAMESPACES[ns["name"]] = {
                         "refid": ns.get("refid", ""),
