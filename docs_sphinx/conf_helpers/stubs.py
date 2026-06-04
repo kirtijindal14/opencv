@@ -995,10 +995,10 @@ def _write_api_stub(node: dict, out_dir: pathlib.Path,
             _stub_write(out_dir / f"{_cn}.md", _md + "\n")
         return
 
-    # Brief + "More…" under the title (mirrors the Doxygen group page).
+    # Brief + "View details" under the title (mirrors the Doxygen group page).
     _brief = node.get("brief") or ""
     if _brief:
-        _more = " [More...](#detailed-description)" if node["detailed"] else ""
+        _more = " [View details](#detailed-description)" if node["detailed"] else ""
         lines += [f"{_brief}{_more}", ""]
 
     if node["children"]:
