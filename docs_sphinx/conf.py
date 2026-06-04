@@ -143,7 +143,11 @@ html_css_files = [
     "custom.css",
 ]
 html_theme_options = {
-    "logo": {"text": f"OpenCV {release}"},
+    "logo": {
+        "text": f"OpenCV {release}",
+        "image_light": "_static/opencv-logo.svg",
+        "image_dark": "_static/opencv-logo.svg",
+    },
     "header_links_before_dropdown": 6,
     "external_links": [
         {"docname": master_doc,                "name": "Main Page"},
