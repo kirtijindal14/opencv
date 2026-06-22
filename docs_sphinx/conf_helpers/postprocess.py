@@ -501,6 +501,90 @@ def _linkify_inline_code(html_dir: pathlib.Path) -> None:
             pass
 
 
+# Center the active section-nav entry inside the scrollable left sidebar on
+# load, so a module far down the list isn't left below the fold. The theme
+# offers no such hook, so inline it once per page before </body>.
+_AUTOSCROLL_SNIPPET = (
+    '<script id="opencv-sidebar-autoscroll">'
+    "document.addEventListener('DOMContentLoaded',function(){"
+    "var s=document.querySelector('.bd-sidebar-primary');if(!s)return;"
+    "var a=s.querySelectorAll('a.current'),t=a[a.length-1];if(!t)return;"  # deepest = current page
+    "var sr=s.getBoundingClientRect(),tr=t.getBoundingClientRect();"
+    "s.scrollTop+=(tr.top-sr.top)-(s.clientHeight-tr.height)/2;});"
+    "</script>"
+)
+
+
+def _inject_sidebar_autoscroll(out_dir: pathlib.Path) -> None:
+    """Inject the sidebar auto-scroll script before </body>; idempotent."""
+    for html in out_dir.rglob("*.html"):
+        text = html.read_text(encoding="utf-8")
+        if "opencv-sidebar-autoscroll" in text or "</body>" not in text:
+            continue
+        html.write_text(
+            text.replace("</body>", _AUTOSCROLL_SNIPPET + "</body>", 1),
+            encoding="utf-8")
+
+
+_TOC_NAV_RE = re.compile(r'id="pst-page-toc-nav".*?</nav>', re.S)
+_TOC_HREF_RE = re.compile(r'href="#([^"]+)"')
+_ANY_ID_RE = re.compile(r'id="([^"]+)"')
+_DETAIL_SEC_RE = re.compile(r'(<section id="detailed-description"[^>]*>)')
+
+
+def _repair_dangling_toc_anchors(out_dir: pathlib.Path) -> None:
+    """Stub a missing #anchor for any secondary-TOC link with no target element.
+    A dangling anchor makes the theme scroll-spy throw, aborting init and killing
+    the collapse-sidebar button on that page. Idempotent."""
+    for html in out_dir.rglob("*.html"):
+        text = html.read_text(encoding="utf-8")
+        nav = _TOC_NAV_RE.search(text)
+        if not nav:
+            continue
+        ids = set(_ANY_ID_RE.findall(text))
+        missing = [a for a in _TOC_HREF_RE.findall(nav.group(0)) if a not in ids]
+        if not missing:
+            continue
+        stubs = "".join(f'<span id="{a}"></span>' for a in missing)
+        new = _DETAIL_SEC_RE.sub(lambda m: m.group(1) + stubs, text, count=1)
+        if new != text:
+            html.write_text(new, encoding="utf-8")
+
+
+def _redirect_orphan_duplicates(app, out_dir: pathlib.Path) -> None:
+    """An orphaned main_modules/* page that duplicates an in-nav extra_modules
+    page redirects to that twin, which has proper section nav. Idempotent."""
+    ti = app.env.toctree_includes
+    seen, stack = set(), [app.env.config.root_doc]
+    while stack:
+        d = stack.pop()
+        if d in seen:
+            continue
+        seen.add(d)
+        stack.extend(ti.get(d, []))
+    for doc in set(app.env.all_docs):
+        if not doc.startswith("main_modules/") or doc in seen:
+            continue
+        base = doc.split("/", 1)[1]
+        if "extra_modules/" + base not in seen:
+            continue
+        html = out_dir / (doc + ".html")
+        if not html.is_file():
+            continue
+        text = html.read_text(encoding="utf-8")
+        if "opencv-dup-redirect" in text:
+            continue
+        target = f"../extra_modules/{base}.html"
+        snippet = (
+            f'<link rel="canonical" href="{target}">'
+            f'<script id="opencv-dup-redirect">location.replace("{target}"+location.hash)</script>'
+            f'<noscript><meta http-equiv="refresh" content="0;url={target}"></noscript>'
+        )
+        new = text.replace("<head>", "<head>" + snippet, 1)
+        if new != text:
+            html.write_text(new, encoding="utf-8")
+
+
 def _inline_coll_graphs_on_finish(app, exception):
     """build-finished entry point."""
     if exception is not None:
@@ -516,3 +600,6 @@ def _inline_coll_graphs_on_finish(app, exception):
     _copy_js_tryit_files(out)
     _fix_gapi_images(out)
     _generate_search_map(out)
+    _repair_dangling_toc_anchors(out)
+    _redirect_orphan_duplicates(app, out)
+    _inject_sidebar_autoscroll(out)

@@ -384,8 +384,14 @@ html[data-theme="dark"] .opencv-version-switcher #opencv-version-select option {
    the content and the (often wide) diagrams get more room. Desktop only; the
    mobile off-canvas drawer keeps the theme's own sizing. */
 @media (min-width: 960px) {
-    .bd-sidebar-primary { width: 16rem; flex: 0 0 16rem; }
+    /* flex:0 0 auto (not a rigid 16rem basis) so the theme's collapse rule
+       (.pst-squeeze{width:4rem}) can still shrink it when collapsed. */
+    .bd-sidebar-primary { width: 16rem; flex: 0 0 auto; }
 }
+
+/* Collapsed: drop the divider line so the content reflows cleanly with no
+   leftover vertical border. */
+.bd-sidebar-primary.pst-squeeze { border-right: none; }
 
 .bd-sidebar-primary nav.bd-links { margin-right: 0 !important; }
 .bd-sidebar-primary nav.bd-docs-nav p.bd-links__title {
