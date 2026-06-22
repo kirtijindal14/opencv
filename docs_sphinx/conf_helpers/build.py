@@ -235,8 +235,7 @@ def _write_root_index() -> None:
             entries.append((heading, link_text, docname))
 
     add("Introduction", "Introduction", "intro", "intro" in _ANCHOR_TO_DOC)
-    # Own landing section; re-homed here after being dropped from the intro
-    # tutorials "Usage basics" list (see translate._source_read).
+    # Own landing section, instead of a bullet in the intro "Usage basics" list.
     _prebuilt = _ANCHOR_TO_DOC.get("tutorial_using_prebuilt_binaries")
     add("How to use pre-built OpenCV binaries",
         "Using OpenCV pre-built binaries in your own projects",

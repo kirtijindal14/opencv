@@ -109,12 +109,6 @@ g++ -std=c++17 main.cpp -o opencv_test_app \
 `calib`, `stereo`, and `ptcloud`. Link the specific one(s) you need, e.g. `-lopencv_geometry`,
 `-lopencv_calib`, `-lopencv_stereo`, or `-lopencv_ptcloud`, instead of `-lopencv_calib3d`.
 
-### Source application
-
-Save the following as `main.cpp`:
-
-@include samples/cpp/tutorial_code/introduction/using_prebuilt_binaries/using_prebuilt_binaries.cpp
-
 Python Project Configuration
 ----------------------------
 
@@ -128,9 +122,7 @@ python3 -c "import cv2; print('OpenCV version:', cv2.__version__)"
 
 #### 2. Test script
 
-Save the following as `app.py`:
-
-@include samples/python/tutorial_code/introduction/using_prebuilt_binaries/using_prebuilt_binaries.py
+Write a short `app.py` that imports `cv2`, loads an image, and displays it to confirm the bindings work.
 
 Troubleshooting
 ---------------
