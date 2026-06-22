@@ -67,6 +67,17 @@ html[data-theme="dark"] .bd-article-container li > a:hover {
 }
 .bd-content a > code, .bd-content code > a { color: inherit; }
 
+/* Cross-reference links inside code — inline chips (`code > a`) and highlighted
+   blocks (`pre a`) — should read as links. The `color: inherit` above otherwise
+   renders them in the plain code colour; re-assert just the link colour (no
+   underline) and force the inner Pygments span to inherit so the token is blue. */
+.bd-content code > a.reference,
+.bd-content pre a.reference {
+    color: var(--pst-color-link, #0969da) !important;
+}
+.bd-content code > a.reference span,
+.bd-content pre a.reference span { color: inherit !important; }
+
 .bd-content a.opencv-enum-link,
 .bd-content code.opencv-enum-sig > a,
 .bd-content .opencv-enum-clickable a,

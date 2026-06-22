@@ -137,6 +137,35 @@ def _add_dnn_engine_selection_topic(out_dir: pathlib.Path) -> None:
         dnn.write_text(new, encoding="utf-8")
 
 
+# Hand-authored standalone HAL page; content lives in core's own doc dir
+# (modules/core/doc, HAL's home) alongside intro.markdown / cuda.markdown.
+_HAL_MD = (
+    OPENCV_ROOT / "modules" / "core" / "doc" / "hal.markdown").read_text(
+    encoding="utf-8")
+
+
+def _add_hal_page(out_dir: pathlib.Path) -> None:
+    """Write the HAL page and add a 'Learn about HAL' link on the api_root page.
+    Call after stub generation and before the anchor scan."""
+    api_root = out_dir / "api_root.markdown"
+    if not api_root.is_file():
+        return
+    (out_dir / "hal.md").write_text(_HAL_MD, encoding="utf-8")
+    text = api_root.read_text(encoding="utf-8")
+    if "](hal.md)" in text:
+        return
+    # Register the page in the section toctree (as the last entry).
+    text = re.sub(r"(```\{toctree\}\n.*?\n)(```\n)", r"\1hal\n\2",
+                  text, count=1, flags=re.S)
+    # Visible "Learn about HAL" section at the end of the page.
+    text = text.rstrip() + (
+        "\n\n## Learn about HAL\n\n"
+        "OpenCV ships a Hardware Acceleration Layer that lets hardware vendors "
+        "inject tuned, silicon-specific implementations behind a stable C "
+        "interface. See [OpenCV Hardware Acceleration Layer (HAL)](hal.md).\n")
+    api_root.write_text(text, encoding="utf-8")
+
+
 if API_MODULES:
     _api_pics = SPHINX_INPUT_ROOT / "api_pics"
     _stage_pics = SPHINX_INPUT_ROOT != DOC_ROOT
@@ -175,6 +204,7 @@ if API_MODULES:
                         root_anchor="api_root", root_title="Main modules",
                         extra_groups=_main_orphans)
     _add_dnn_engine_selection_topic(SPHINX_INPUT_ROOT / "main_modules")
+    _add_hal_page(SPHINX_INPUT_ROOT / "main_modules")
     _scan_internal(SPHINX_INPUT_ROOT / "main_modules")
     if _extra_api or _extra_orphans:
         _generate_api_stubs(_extra_api, _API_XML_DIR, SPHINX_INPUT_ROOT / "extra_modules",
