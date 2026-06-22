@@ -2365,91 +2365,6 @@ def _fallback_module_tree(name: str):
     }
 
 
-def _apply_group_doc_override(tree: dict, xml_dir: pathlib.Path) -> None:
-    """Header-free fix for module groups whose subgroups were `@addtogroup`'d but
-    never nested under a titled `@defgroup`: Doxygen leaves them as disconnected
-    top-level groups, auto-titled from their id, so the module landing page is
-    empty. Inject the module-group description (if the header gave none) and
-    attach the real subgroups as children (recursively retitled), so the landing
-    page covers the whole module and each subgroup renders once instead of as an
-    orphan. Driven by `_GROUP_DOC_OVERRIDES` / `_GROUP_TITLE_OVERRIDES`; no-op for
-    modules without an override."""
-    ov = _GROUP_DOC_OVERRIDES.get(tree["name"])
-    if not ov:
-        return
-    if ov.get("detailed") and not tree["detailed"]:
-        tree["detailed"] = ov["detailed"]
-    have = {c["name"] for c in tree["children"]}
-    for sub in ov.get("subgroups", ()):
-        if sub in have:
-            continue
-        child = _build_api_hierarchy("group__" + sub.replace("_", "__"), xml_dir)
-        if child is not None:
-            tree["children"].append(child)
-
-    def _retitle(node: dict) -> None:
-        node["title"] = _GROUP_TITLE_OVERRIDES.get(node["name"], node["title"])
-        for c in node.get("children", ()):
-            _retitle(c)
-    _retitle(tree)
-
-
-def _harvest_namespace_into_group(tree: dict, xml_dir: pathlib.Path) -> None:
-    # Pull funcs/classes declared under the module's include prefix into the
-    # (otherwise empty) group node — from the cv namespace AND any group they
-    # were filed under (e.g. depth.hpp uses @addtogroup rgbd). See
-    # _GROUP_NS_HARVEST.
-    import xml.etree.ElementTree as _ET
-    prefix = _GROUP_NS_HARVEST.get(tree["name"])
-    if not prefix:
-        return
-    tree.setdefault("sections", {})
-    have = {c["refid"] for c in tree["innerclasses"]}
-
-    def _ingest(cd):
-        for title, members in _parse_member_sections(cd).items():
-            seen = {m["id"] for m in tree["sections"].get(title, [])}
-            kept = [m for m in members
-                    if (m.get("include_file") or "").startswith(prefix)
-                    and m["id"] not in seen]
-            if kept:
-                tree["sections"].setdefault(title, []).extend(kept)
-        for ic in cd.findall("innerclass"):
-            rid = ic.get("refid", "")
-            if ic.get("prot") != "public" or not rid or rid in have:
-                continue
-            cx = xml_dir / f"{rid}.xml"
-            if not cx.is_file():
-                continue
-            try:
-                ccd = _ET.parse(cx).getroot().find("compounddef")
-            except _ET.ParseError:
-                continue
-            loc = ccd.find("location") if ccd is not None else None
-            if loc is None or not (loc.get("file") or "").startswith(prefix):
-                continue
-            qualified = " ".join((ic.text or "").split())
-            tree["innerclasses"].append({
-                "refid": rid, "name": qualified, "qualified": qualified,
-                "kind": "struct" if rid.startswith("struct") else "class",
-                "brief": _read_class_brief(rid, xml_dir),
-            })
-            have.add(rid)
-
-    srcs = [xml_dir / "namespacecv.xml"]
-    srcs += [g for g in xml_dir.glob("group__*.xml")
-             if prefix in g.read_text(encoding="utf-8", errors="ignore")]
-    for s in srcs:
-        if not s.is_file():
-            continue
-        try:
-            cd = _ET.parse(s).getroot().find("compounddef")
-        except _ET.ParseError:
-            continue
-        if cd is not None:
-            _ingest(cd)
-
-
 def _generate_api_stubs(modules, xml_dir, out_dir,
                         root_anchor="api_root", root_title="API Reference",
                         root_desc=None, extra_groups=()):
@@ -2517,10 +2432,6 @@ def _generate_api_stubs(modules, xml_dir, out_dir,
     _gapi_tree = None  # saved to write gapi.md wrapper after all stubs
     for m in list(modules) + list(extra_groups):
         is_extra = m in extra_groups
-        if m in _GROUP_OVERRIDE_SUBGROUPS:
-            # Re-parented as a nested child of its module (see _GROUP_DOC_OVERRIDES);
-            # don't also emit it here as a standalone orphan page.
-            continue
         stem = _module_group_stem(m)
         tree = _build_api_hierarchy("group__" + stem.replace("_", "__"), xml_dir)
         if tree is None:
@@ -2529,8 +2440,6 @@ def _generate_api_stubs(modules, xml_dir, out_dir,
             tree = _fallback_module_tree(m)
         if tree is None:
             continue
-        _apply_group_doc_override(tree, xml_dir)
-        _harvest_namespace_into_group(tree, xml_dir)
         trees.append(tree)
         if is_extra:
             pass

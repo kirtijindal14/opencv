@@ -137,53 +137,6 @@ def _module_group_stem(m: str) -> str:
             return _mm.group(1) if _mm else m
     return m
 
-# -- Header-free API-group doc overrides ------------------------------------
-# geometry/ptcloud subgroups use `@addtogroup` without a titled `@defgroup`, so
-# Doxygen leaves them un-nested, auto-titled (e.g. "Geometry_subdiv2d") and the
-# module page empty. Supply the description + re-parent here, not in the headers.
-_GROUP_DOC_OVERRIDES: dict = {
-    "geometry": {
-        "detailed": (
-            "Coordinate geometry grouped into one module: 2D shape analysis and "
-            "fitting, planar subdivision, multi-view 3D vision (camera pose, "
-            "triangulation, homography) and point-cloud sampling and "
-            "segmentation. In OpenCV 5 these were consolidated here from the "
-            "[imgproc](imgproc.md) and [calib](calib.md) modules.\n\n"
-            "**Migration (OpenCV 5):** these symbols are no longer re-exported "
-            "by [imgproc](imgproc.md); code that calls e.g. "
-            "[convexHull](geometry_shape.md) must include "
-            "[opencv2/geometry.hpp](geometry_8hpp.md) directly."
-        ),
-        # "d_projection" = Doxygen mangling of `3d_projection`; "_3d" never @defgroup'd.
-        "subgroups": ["geometry_shape", "d_projection", "_3d"],
-    },
-    "ptcloud": {
-        "detailed": (
-            "Point-cloud and mesh processing: reading and writing point clouds "
-            "and meshes, triangle rasterization, spatial partitioning (octree), "
-            "and RGB-D / volumetric 3D reconstruction (odometry, TSDF volumes)."
-        ),
-    },
-}
-# Titles for groups Doxygen auto-titled from their id; real titles left alone.
-_GROUP_TITLE_OVERRIDES: dict = {
-    "geometry":          "Computational Geometry Primitives Module",
-    "geometry_shape":    "Shape analysis and fitting",
-    "geometry_subdiv2d": "Planar subdivision",
-    "_3d":               "Point-cloud sampling and segmentation",
-    "ptcloud":           "Point Cloud Processing",  # header typo'd "Clound"
-}
-# Re-parented subgroups; skipped by orphan-group emission so each renders once.
-_GROUP_OVERRIDE_SUBGROUPS: set = {
-    _sub for _ov in _GROUP_DOC_OVERRIDES.values()
-    for _sub in _ov.get("subgroups", ())
-}
-# Harvest cv-namespace symbols orphaned by @addtogroup opened outside `namespace cv`.
-_GROUP_NS_HARVEST: dict = {
-    "ptcloud": "opencv2/ptcloud",
-    "geometry": "opencv2/geometry/mst.hpp",  # mst.hpp has no @addtogroup
-}
-
 # -- Python enum/constant signatures ----------------------------------------
 # C++ enumerator FQN -> cv2.* name; env OPENCV_PYTHON_SIGNATURES_FILE
 _PY_SIGNATURES: dict = {}
@@ -1038,8 +991,6 @@ __all__ = [
     "DOC_MODULES", "JS_DOC_MODULES", "PY_DOC_MODULES",
     "CONTRIB_MODULES", "CONTRIB_ROOT", "SPHINX_INPUT_ROOT", "API_MODULES",
     "_API_XML_DIR", "_PATCHED_XML_DIR", "_module_group_stem",
-    "_GROUP_DOC_OVERRIDES", "_GROUP_OVERRIDE_SUBGROUPS", "_GROUP_TITLE_OVERRIDES",
-    "_GROUP_NS_HARVEST",
     "_PY_SIGNATURES", "_python_enum_name",
     "HAVE_SPHINX_DESIGN", "HAVE_BREATHE",
     "DOXYGEN_BASE_URL", "_doxygen_url",
