@@ -585,6 +585,59 @@ def _redirect_orphan_duplicates(app, out_dir: pathlib.Path) -> None:
             html.write_text(new, encoding="utf-8")
 
 
+# DNN engine-selection topic: symbols → their API anchor (same dir as the page).
+_DNN_ENGINE_LINKS = {
+    "readNet": "dnn.html#readnet",
+    "readNetFromONNX": "dnn.html#readnetfromonnx",
+    "ENGINE_NEW": "dnn.html#enginetype",
+    "ENGINE_CLASSIC": "dnn.html#enginetype",
+    "ENGINE_AUTO": "dnn.html#enginetype",
+    "ENGINE_ORT": "dnn.html#enginetype",
+    "EngineType": "dnn.html#enginetype",
+    "DNN_BACKEND_CUDA": "dnn.html#backend",
+    "DNN_BACKEND_OPENVINO": "dnn.html#backend",
+    "DNN_TARGET_CUDA": "dnn.html#target",
+    "setPreferableBackend": "classcv_1_1dnn_1_1Net.html#setpreferablebackend",
+    "setPreferableTarget": "classcv_1_1dnn_1_1Net.html#setpreferabletarget",
+}
+# Whole inline-code spans (qualified forms) → anchor; bare names reuse the above.
+_DNN_ENGINE_INLINE = {
+    "cv::dnn::readNet()": "dnn.html#readnet",
+    "net.forward()": "classcv_1_1dnn_1_1Net.html#forward",
+    "readNet*()": "dnn.html#readnet",
+    **_DNN_ENGINE_LINKS,
+}
+_INLINE_CODE_SPAN_RE = re.compile(
+    r'<code class="docutils literal notranslate">([^<]+)</code>')
+_PYG_TOKEN_SPAN_RE = re.compile(r'<span class="(n|nc|nf|nb|nv|na)">(\w+)</span>')
+
+
+def _linkify_dnn_engine_selection(out_dir: pathlib.Path) -> None:
+    """Make DNN engine/backend symbols clickable on the engine-selection topic,
+    in both inline code and highlighted code blocks. Idempotent."""
+    page = out_dir / "main_modules" / "dnn_engine_selection.html"
+    if not page.is_file():
+        return
+    text = page.read_text(encoding="utf-8")
+    if 'href="dnn.html#enginetype"' in text:        # already linkified
+        return
+
+    def _inline(m: "re.Match") -> str:
+        href = _DNN_ENGINE_INLINE.get(m.group(1).strip())
+        return (f'<code class="docutils literal notranslate">'
+                f'<a class="reference internal" href="{href}">{m.group(1)}</a>'
+                f'</code>') if href else m.group(0)
+
+    def _token(m: "re.Match") -> str:
+        href = _DNN_ENGINE_LINKS.get(m.group(2))
+        return (f'<a class="reference internal" href="{href}">'
+                f'<span class="{m.group(1)}">{m.group(2)}</span></a>'
+                ) if href else m.group(0)
+
+    text = _PYG_TOKEN_SPAN_RE.sub(_token, _INLINE_CODE_SPAN_RE.sub(_inline, text))
+    page.write_text(text, encoding="utf-8")
+
+
 def _inline_coll_graphs_on_finish(app, exception):
     """build-finished entry point."""
     if exception is not None:
@@ -602,4 +655,5 @@ def _inline_coll_graphs_on_finish(app, exception):
     _generate_search_map(out)
     _repair_dangling_toc_anchors(out)
     _redirect_orphan_duplicates(app, out)
+    _linkify_dnn_engine_selection(out)
     _inject_sidebar_autoscroll(out)
