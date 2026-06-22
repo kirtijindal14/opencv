@@ -7,6 +7,8 @@
 """Runtime patches for Sphinx C++ domain and breathe; applied at import."""
 from __future__ import annotations
 
+import re
+
 def _patch_cpp_xref_resolver():
     """Work around Sphinx 8.1.x parentSymbol assert in _resolve_xref_inner."""
     try:
@@ -216,7 +218,13 @@ def _patch_sidebar_section_root():
         # otherwise fall back to the section's api_root.
         if out is None or not ti.get(out):
             _sec = pagename.split("/", 1)[0]
-            if d != pagename and ti.get(d) and d.split("/", 1)[0] == _sec:
+            _base = pagename.rsplit("/", 1)[-1]
+            # Doxygen file/dir-reference pages (#include graphs) are orphan
+            # utilities, not module content: leave None so the sidebar is
+            # suppressed rather than rooting at the section's api_root.
+            if re.search(r"_8\w+$", _base) or _base.startswith("dir_"):
+                out = None
+            elif d != pagename and ti.get(d) and d.split("/", 1)[0] == _sec:
                 out = d
             elif ti.get(_sec + "/api_root"):
                 out = _sec + "/api_root"
