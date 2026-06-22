@@ -176,6 +176,12 @@ def _write_root_index() -> None:
             entries.append((heading, link_text, docname))
 
     add("Introduction", "Introduction", "intro", "intro" in _ANCHOR_TO_DOC)
+    # Own landing section; re-homed here after being dropped from the intro
+    # tutorials "Usage basics" list (see translate._source_read).
+    _prebuilt = _ANCHOR_TO_DOC.get("tutorial_using_prebuilt_binaries")
+    add("How to use pre-built OpenCV binaries",
+        "Using OpenCV pre-built binaries in your own projects",
+        _prebuilt or "", bool(_prebuilt))
     add("OpenCV Tutorials", "OpenCV tutorials", "tutorials/tutorials")
     add("Python Tutorials", "OpenCV-Python tutorials",
         "py_tutorials/py_tutorials", bool(PY_DOC_MODULES))

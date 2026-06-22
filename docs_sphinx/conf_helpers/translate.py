@@ -1188,6 +1188,12 @@ def _source_read(app, docname, source):
             or docname == "index"):
         return
     text = source[0]
+    # Moved to the index landing under Introduction: drop its "Usage basics"
+    # bullet here (it's re-homed in index's toctree by _write_root_index).
+    if docname == "tutorials/introduction/table_of_content_introduction":
+        text = re.sub(
+            r"(?m)^[ \t]*-[ \t]+@subpage\s+tutorial_using_prebuilt_binaries\b.*\n?",
+            "", text)
     # Master doc: append contrib/api roots without editing tutorials.markdown.
     if docname == "tutorials/tutorials" and not USE_INDEX_LANDING:
         if CONTRIB_MODULES and "tutorial_contrib_root" in _ANCHOR_TO_DOC:
