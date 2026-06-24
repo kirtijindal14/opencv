@@ -1876,6 +1876,9 @@ TEST_P(Test_ONNX_conformance, Layer_Test)
         {
             default_l1 = std::max(default_l1, 3e-5);
         }
+        if (name == "test_gridsample_bicubic") {
+            default_l1 = 1e-4; // reference output is stored at 4 decimals (~5e-5 floor), below the 1e-5 default
+        }
         if (name == "test_gelu_tanh_1") {
             default_l1 = 0.00011; // Expected: (normL1) <= (l1), actual: 0.000101805 vs 1e-05
             default_lInf = 0.00016; // Expected: (normInf) <= (lInf), actual: 0.000152707 vs 0.0001

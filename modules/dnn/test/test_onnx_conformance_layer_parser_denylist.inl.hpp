@@ -284,9 +284,6 @@
 "test_dynamicquantizelinear_min_adjusted_expanded",  // ---- same as above ---
 "test_equal_string",
 "test_equal_string_broadcast",
-"test_gridsample_bicubic",  // ---- same as above ---
-"test_gridsample_bicubic_align_corners_0_additional_1",
-"test_gridsample_bicubic_align_corners_1_additional_1",
 "test_group_normalization_epsilon_expanded",
 "test_group_normalization_example_expanded",
 "test_identity_opt",  //  23221 illegal hardware instruction
