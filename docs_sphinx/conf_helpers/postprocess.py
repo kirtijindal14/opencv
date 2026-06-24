@@ -171,12 +171,15 @@ def _copy_js_tryit_files(out_dir: pathlib.Path) -> None:
             dst = dest / src.name
             if not dst.exists():
                 shutil.copy2(src, dst)
-    # opencv.js from CMake (OPENCV_JS_PATH); bundle it alongside the Try-it pages.
+    # opencv.js from CMake (OPENCV_JS_PATH). Bundle it alongside the Try-it pages
+    # (relative `src="opencv.js"` / utils.js OPENCV_URL resolve here) AND at the
+    # doc-site root: external tutorials and OpenCV's own js_usage docs link
+    # https://docs.opencv.org/<ver>/opencv.js, which 404s unless it exists at root.
     opencv_js = os.environ.get("OPENCV_JS_PATH", "")
     if opencv_js and pathlib.Path(opencv_js).is_file():
-        dst = dest / "opencv.js"
-        if not dst.exists():
-            shutil.copy2(opencv_js, dst)
+        for dst in (dest / "opencv.js", dest.parent / "opencv.js"):
+            if not dst.exists():
+                shutil.copy2(opencv_js, dst)
     # Extra assets referenced by Try-it pages but not in js_assets/.
     _opencv_root = DOC_ROOT.parent
     for _name, _src in {
