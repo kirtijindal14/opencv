@@ -16,6 +16,7 @@
 
 #include "precomp.hpp"
 #include "net_impl.hpp"
+#include "layers/layers_common.hpp"
 
 namespace cv { namespace dnn {
 CV__DNN_INLINE_NS_BEGIN
@@ -41,6 +42,19 @@ struct ModelFusionReshapeTranspose
         if (perm.empty()) return false;
         for (size_t i = 0; i < perm.size(); i++)
             if (perm[i] != (int)i) return false;
+        return true;
+    }
+
+    // A '0' in a reshape spec copies the matching input dim, so the inner reshape
+    // can't be dropped. Fuse only when the spec is constant and provably zero-free.
+    bool reshapeSpecHasNoZeros(const Ptr<Layer>& layer)
+    {
+        if (layer->inputs.size() < 2 || !netimpl->isConstArg(layer->inputs[1]))
+            return false;
+        MatShape spec = tensorToShape(netimpl->argTensor(layer->inputs[1]));
+        for (int i = 0; i < spec.dims; i++)
+            if (spec[i] == 0)
+                return false;
         return true;
     }
 
@@ -140,7 +154,8 @@ struct ModelFusionReshapeTranspose
                         Arg prevOut = layer->inputs[0];
                         bool single_consumer = usecounts[prevOut.idx] == 1
                                             && externalArgs.count(prevOut.idx) == 0;
-                        if (prevRs && pl->outputs.size() == 1 && single_consumer)
+                        if (prevRs && pl->outputs.size() == 1 && single_consumer
+                            && reshapeSpecHasNoZeros(layer))
                         {
                             layer->inputs[0] = pl->inputs[0];
                             dropped[prod_idx] = true;

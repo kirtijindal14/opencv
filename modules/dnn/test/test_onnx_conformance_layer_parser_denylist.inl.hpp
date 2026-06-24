@@ -284,8 +284,6 @@
 "test_dynamicquantizelinear_min_adjusted_expanded",  // ---- same as above ---
 "test_equal_string",
 "test_equal_string_broadcast",
-"test_group_normalization_epsilon_expanded",
-"test_group_normalization_example_expanded",
 "test_identity_opt",  //  23221 illegal hardware instruction
 "test_identity_sequence",  // Issue:: Unkonwn error
 "test_if_opt",  // Issue::Failed to allocate 17059022683624350 bytes in function 'OutOfMemoryError'

@@ -934,8 +934,12 @@ CASE(test_gridsample_volumetric_nearest_align_corners_1)
     SKIP;
 CASE(test_group_normalization_epsilon)
     // no filter
+CASE(test_group_normalization_epsilon_expanded)
+    SKIP;
 CASE(test_group_normalization_example)
     // no filter
+CASE(test_group_normalization_example_expanded)
+    SKIP;
 CASE(test_gru_batchwise)
     SKIP;
 CASE(test_gru_defaults)
