@@ -1073,7 +1073,12 @@ def _write_api_stub(node: dict, out_dir: pathlib.Path,
             parent_qualified = q.rsplit("::", 1)[0]
             for c in classes_seen.values():
                 if c.get("qualified") == parent_qualified:
-                    return f"{_class_page_name(c['refid'])}.md"
+                    # This target is embedded in a raw-HTML <a href> (see
+                    # _func_row_split_md), and MyST only rewrites .md->.html for
+                    # Markdown []() links, not raw HTML — so point at the built
+                    # .html page directly, else the href 404s. (_member_anchor_
+                    # link keeps .md: it IS a Markdown link, so MyST converts it.)
+                    return f"{_class_page_name(c['refid'])}.html"
         # Functions on core pages: target the `_func_slug`-based anchor
         # that `_render_core_basic_func` actually emits.
         if _is_core_page and m.get("kind") == "function" and m.get("name"):
@@ -1214,13 +1219,17 @@ def _write_api_stub(node: dict, out_dir: pathlib.Path,
             def _safe(s: str) -> str:
                 return _html_mod.escape(s).replace("::", "&#58;&#58;")
             for m in members:
+                # Named enums anchor on their `### Name` heading slug
+                # (`### AccessFlag` → `#accessflag`). Anonymous enums have no
+                # name; the detail loop gives them a MyST `({id})=` target, whose
+                # slug normalizes `_`-runs to `-` (same as functions, _member_
+                # anchor_target). Match that here instead of emitting an empty
+                # `#` (a raw `#<id>` with underscores does NOT resolve in MyST).
+                _enum_anchor = (m["name"].lower() if m.get("name")
+                                else re.sub(r"_+", "-", m["id"]))
                 _more = ""
                 if _enum_more_link:
-                    # Link to the enum detail block's heading-slug id
-                    # (`### AccessFlag` → `#accessflag`). Same target
-                    # the clickable synopsis tokens use, and a literal
-                    # match on the actual element id on the page.
-                    _more = f"[View details](#{m['name'].lower()})"
+                    _more = f"[View details](#{_enum_anchor})"
                 if _clickable_synopsis:
                     _qual = m["qualified"] or m["name"]
                     _is_strong = bool(m.get("strong"))
@@ -1234,7 +1243,7 @@ def _write_api_stub(node: dict, out_dir: pathlib.Path,
                         _val_prefix = _qual.rsplit("::", 1)[0] + "::"
                     else:
                         _val_prefix = ""
-                    _href = f"#{m['name'].lower()}"  # enum detail block id
+                    _href = f"#{_enum_anchor}"  # enum detail block id
                     out.append(
                         '<div class="highlight-cpp notranslate '
                         'opencv-enum-clickable"><div class="highlight"><pre>'
@@ -1363,7 +1372,16 @@ def _write_api_stub(node: dict, out_dir: pathlib.Path,
                         "",
                     ]
                 else:
-                    blk = [f'<h3 id="{m["id"]}">{_keyword}</h3>', ""]
+                    # Anonymous enum: no name → no heading slug. Anchor it by a
+                    # MyST `({id})=` target (its slug normalizes `_`-runs to `-`,
+                    # like function detail blocks), which the summary's
+                    # `_enum_anchor` links to. A raw `<h3 id=…>` is not a
+                    # MyST-resolvable reference target, so it would dead-link.
+                    blk = [
+                        f"({m['id']})=",
+                        f"### {_keyword}",
+                        "",
+                    ]
                 if m.get("include_file"):
                     _einc = m["include_file"]
                     _ehref = _include_page_href(_einc)
