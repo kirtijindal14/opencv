@@ -386,7 +386,7 @@ void showSphere(const String& win_name, const String& obj_name, float radius, co
 
         if (mode == RENDER_SIMPLE)
         {
-            for (int i = 0; i < verts_data.size() / 6; ++i)
+            for (int i = 0; i < (int)(verts_data.size() / 6); ++i)
             {
                 float l = sqrtf(verts_data[6 * i + 0] * verts_data[6 * i + 0] + verts_data[6 * i + 1] * verts_data[6 * i + 1] + verts_data[6 * i + 2] * verts_data[6 * i + 2]);
                 float r = radius / l;
@@ -400,7 +400,7 @@ void showSphere(const String& win_name, const String& obj_name, float radius, co
         }
         else
         {
-            for (int i = 0; i < verts_data.size() / 9; ++i)
+            for (int i = 0; i < (int)(verts_data.size() / 9); ++i)
             {
                 float l = sqrtf(verts_data[9 * i + 0] * verts_data[9 * i + 0] + verts_data[9 * i + 1] * verts_data[9 * i + 1] + verts_data[9 * i + 2] * verts_data[9 * i + 2]);
                 float r = radius / l;
@@ -485,9 +485,9 @@ void showCameraTrajectory(
         };
 
         // Add line points
-        for (int i = 0; i < sizeof(lines) / sizeof(Vec3f); ++i)
+        for (int j = 0; j < (int)(sizeof(lines) / sizeof(Vec3f)); ++j)
             points_data.insert(points_data.end(), {
-                lines[i](0), lines[i](1), lines[i](2),
+                lines[j](0), lines[j](1), lines[j](2),
                 frustum_color[0], frustum_color[1], frustum_color[2],
             });
     }
@@ -699,20 +699,20 @@ View::View()
     this->lookAt(this->origin, { 0.0f, 1.0f, 0.0f });
 }
 
-void View::setAspect(float aspect)
+void View::setAspect(float aspect_)
 {
-    if (this->aspect != aspect)
+    if (this->aspect != aspect_)
     {
-        this->aspect = aspect;
+        this->aspect = aspect_;
         this->setPerspective(this->fov, this->z_near, this->z_far);
     }
 }
 
-void View::setPerspective(float fov, float z_near, float z_far)
+void View::setPerspective(float fov_, float z_near_, float z_far_)
 {
-    this->fov = fov;
-    this->z_near = z_near;
-    this->z_far = z_far;
+    this->fov = fov_;
+    this->z_near = z_near_;
+    this->z_far = z_far_;
 
     float tan_half_fovy = ::tan(this->fov / 2.0f);
     this->proj = Matx44f::zeros();
@@ -744,8 +744,8 @@ void View::move(float dx, float dy)
 {
     Vec3f forward = normalize(this->position - this->origin);
     Vec3f right = normalize(this->up.cross(forward));
-    Vec3f up = right.cross(forward);
-    Vec3f delta = normalize(right * dx - up * dy) * this->distance * 0.01f;
+    Vec3f up_v = right.cross(forward);
+    Vec3f delta = normalize(right * dx - up_v * dy) * this->distance * 0.01f;
 
     this->origin += delta;
     this->position += delta;
@@ -761,10 +761,10 @@ void View::scaleDistance(float amount)
     this->lookAt(this->origin, this->up);
 }
 
-void View::lookAt(const Vec3f& point, const Vec3f& up)
+void View::lookAt(const Vec3f& point, const Vec3f& up_)
 {
     Vec3f f = normalize(point - this->position);
-    Vec3f s = normalize(up.cross(f));
+    Vec3f s = normalize(up_.cross(f));
     Vec3f u = f.cross(s);
 
     this->view = Matx44f(s(0), u(0), f(0), 0.0f,
@@ -773,9 +773,9 @@ void View::lookAt(const Vec3f& point, const Vec3f& up)
                          -s.dot(this->position), -u.dot(this->position), -f.dot(this->position), 1.0f);
 }
 
-Window::Window(const String& name)
+Window::Window(const String& name_)
 {
-    this->name = name;
+    this->name = name_;
     this->sun.direction = normalize(Vec3f(0.3f, 1.0f, 0.5f));
     this->sun.ambient = { 0.1f, 0.1f, 0.1f };
     this->sun.diffuse = { 1.0f, 1.0f, 1.0f };
@@ -834,11 +834,11 @@ void Window::set(const String& obj_name, Object* obj)
 
     if (obj)
     {
-        String name = obj->getShaderName();
-        auto it = this->shaders.find(name);
-        if (it == this->shaders.end())
-            this->shaders[name] = obj->buildShader();
-        obj->setShader(this->shaders[name]);
+        String shaderName = obj->getShaderName();
+        auto sit = this->shaders.find(shaderName);
+        if (sit == this->shaders.end())
+            this->shaders[shaderName] = obj->buildShader();
+        obj->setShader(this->shaders[shaderName]);
     }
 }
 
@@ -857,7 +857,6 @@ void Window::setSky(const Vec3f& color)
 static Mat getGridVertices(const View& view)
 {
     const Vec3f grid_color = { 0.5f, 0.5f, 0.5f };
-    const Vec3f axis_color = { 0.8f, 0.8f, 0.8f };
     const Vec3f center = view.getOrigin();
     const Vec3f camera_dir = view.getOrigin() - view.getPosition();
     const float scale = 0.3f;
@@ -866,7 +865,7 @@ static Mat getGridVertices(const View& view)
     if (view.getDistance() * scale / tick_step > 4.0)
         tick_step *= powf(floorf(logf(view.getDistance() * scale) / logf(tick_step)), 2.0);
 
-        tick_step *= log1p(view.getDistance() * scale / 4.0);
+    tick_step *= log1p(view.getDistance() * scale / 4.0);
     while (view.getDistance() * scale / tick_step > 4.0f)
         tick_step *= 2.0f;
     while (view.getDistance() * scale / tick_step < 2.0f)
@@ -949,15 +948,15 @@ static Mat getGridVertices(const View& view)
         float x = (floor(min_p(0) / tick_step) + 1.0f) * tick_step;
         for (; x < max_p(0); x += tick_step)
         {
-            Vec3f a, b, c;
-            a(0) = b(0) = x;
-            a(1) = b(1) = face_sign[2] > 0.0f ? max_p(1) : min_p(1);
-            a(2) = face_sign[0] > 0.0f ? min_p(2) : max_p(2);
-            b(2) = a(2) - face_sign[0] * 0.03f * scale * view.getDistance();
+            Vec3f la, lb;
+            la(0) = lb(0) = x;
+            la(1) = lb(1) = face_sign[2] > 0.0f ? max_p(1) : min_p(1);
+            la(2) = face_sign[0] > 0.0f ? min_p(2) : max_p(2);
+            lb(2) = la(2) - face_sign[0] * 0.03f * scale * view.getDistance();
 
             float line[] = {
-                a(0), a(1), a(2), 0.8f, 0.0f, 0.0f,
-                b(0), b(1), b(2), 0.8f, 0.0f, 0.0f,
+                la(0), la(1), la(2), 0.8f, 0.0f, 0.0f,
+                lb(0), lb(1), lb(2), 0.8f, 0.0f, 0.0f,
             };
 
             points.push_back(Mat(2, 6, CV_32F, line));
@@ -966,15 +965,15 @@ static Mat getGridVertices(const View& view)
         float y = (floor(min_p(1) / tick_step) + 1.0f) * tick_step;
         for (; y < max_p(1); y += tick_step)
         {
-            Vec3f a, b;
-            a(0) = b(0) = face_sign[1] > 0.0f ? max_p(0) : min_p(0);
-            a(1) = b(1) = y;
-            a(2) = face_sign[0] > 0.0f ? min_p(2) : max_p(2);
-            b(2) = a(2) - face_sign[0] * 0.03f * scale * view.getDistance();
+            Vec3f la, lb;
+            la(0) = lb(0) = face_sign[1] > 0.0f ? max_p(0) : min_p(0);
+            la(1) = lb(1) = y;
+            la(2) = face_sign[0] > 0.0f ? min_p(2) : max_p(2);
+            lb(2) = la(2) - face_sign[0] * 0.03f * scale * view.getDistance();
 
             float line[] = {
-                a(0), a(1), a(2), 0.0f, 0.8f, 0.0f,
-                b(0), b(1), b(2), 0.0f, 0.8f, 0.0f,
+                la(0), la(1), la(2), 0.0f, 0.8f, 0.0f,
+                lb(0), lb(1), lb(2), 0.0f, 0.8f, 0.0f,
             };
 
             points.push_back(Mat(2, 6, CV_32F, line));
@@ -983,15 +982,15 @@ static Mat getGridVertices(const View& view)
         float z = (floor(min_p(2) / tick_step) + 1.0f) * tick_step;
         for (; z < max_p(2); z += tick_step)
         {
-            Vec3f a, b;
-            a(0) = face_sign[1] > 0.0f ? min_p(0) : max_p(0);
-            b(0) = a(0) - face_sign[1] * 0.03f * scale * view.getDistance();
-            a(1) = b(1) = face_sign[2] > 0.0f ? max_p(1) : min_p(1);
-            a(2) = b(2) = z;
+            Vec3f la, lb;
+            la(0) = face_sign[1] > 0.0f ? min_p(0) : max_p(0);
+            lb(0) = la(0) - face_sign[1] * 0.03f * scale * view.getDistance();
+            la(1) = lb(1) = face_sign[2] > 0.0f ? max_p(1) : min_p(1);
+            la(2) = lb(2) = z;
 
             float line[] = {
-                a(0), a(1), a(2), 0.0f, 0.0f, 0.8f,
-                b(0), b(1), b(2), 0.0f, 0.0f, 0.8f,
+                la(0), la(1), la(2), 0.0f, 0.0f, 0.8f,
+                lb(0), lb(1), lb(2), 0.0f, 0.0f, 0.8f,
             };
 
             points.push_back(Mat(2, 6, CV_32F, line));
@@ -1075,15 +1074,15 @@ Object::Object()
     this->model = Matx44f::eye();
 }
 
-void Object::setPosition(const Vec3f& position)
+void Object::setPosition(const Vec3f& position_)
 {
-    this->position = position;
+    this->position = position_;
     this->updateModel();
 }
 
-void Object::setRotation(const Vec3f& rotation)
+void Object::setRotation(const Vec3f& rotation_)
 {
-    this->rotation = rotation;
+    this->rotation = rotation_;
     this->updateModel();
 }
 
@@ -1118,26 +1117,26 @@ void Object::updateModel()
     this->model = rot_c * rot_b * rot_a * trans;
 }
 
-Mesh::Mesh(InputArray verts, InputArray indices)
+Mesh::Mesh(InputArray verts_, InputArray indices_)
 {
     // Check parameter validity
-    CV_Assert(verts.channels() == 1 && verts.dims() == 2 && (verts.size().width == 3 || verts.size().width == 6 || verts.size().width == 9));
-    CV_Assert(verts.depth() == CV_32F);
-    CV_Assert(indices.channels() == 1 && indices.dims() == 2 && indices.size().width == 3);
-    CV_Assert(indices.depth() == CV_8U || indices.depth() == CV_16U || indices.depth() == CV_32S);
+    CV_Assert(verts_.channels() == 1 && verts_.dims() == 2 && (verts_.size().width == 3 || verts_.size().width == 6 || verts_.size().width == 9));
+    CV_Assert(verts_.depth() == CV_32F);
+    CV_Assert(indices_.channels() == 1 && indices_.dims() == 2 && indices_.size().width == 3);
+    CV_Assert(indices_.depth() == CV_8U || indices_.depth() == CV_16U || indices_.depth() == CV_32S);
 
     // Prepare buffers
-    if (verts.kind() == _InputArray::OPENGL_BUFFER)
-        this->verts = verts.getOGlBuffer();
+    if (verts_.kind() == _InputArray::OPENGL_BUFFER)
+        this->verts = verts_.getOGlBuffer();
     else
-        this->verts.copyFrom(verts, ogl::Buffer::ARRAY_BUFFER);
+        this->verts.copyFrom(verts_, ogl::Buffer::ARRAY_BUFFER);
 
-    if (indices.kind() == _InputArray::OPENGL_BUFFER)
-        this->indices = indices.getOGlBuffer();
+    if (indices_.kind() == _InputArray::OPENGL_BUFFER)
+        this->indices = indices_.getOGlBuffer();
     else
-        this->indices.copyFrom(indices, ogl::Buffer::ELEMENT_ARRAY_BUFFER);
+        this->indices.copyFrom(indices_, ogl::Buffer::ELEMENT_ARRAY_BUFFER);
 
-    switch (indices.depth())
+    switch (indices_.depth())
     {
     case CV_8U:
         this->index_type = ogl::UNSIGNED_BYTE;
@@ -1151,25 +1150,25 @@ Mesh::Mesh(InputArray verts, InputArray indices)
     }
 
     // Prepare vertex array
-    this->initVA(verts.size().width);
+    this->initVA(verts_.size().width);
 }
 
-Mesh::Mesh(InputArray verts)
+Mesh::Mesh(InputArray verts_)
 {
     // Check parameter validity
-    CV_Assert(verts.channels() == 1 && verts.dims() == 2 && (verts.size().width == 3 || verts.size().width == 6 || verts.size().width == 9));
-    CV_Assert(verts.depth() == CV_32F);
+    CV_Assert(verts_.channels() == 1 && verts_.dims() == 2 && (verts_.size().width == 3 || verts_.size().width == 6 || verts_.size().width == 9));
+    CV_Assert(verts_.depth() == CV_32F);
 
     // Prepare buffers
-    if (verts.kind() == _InputArray::OPENGL_BUFFER)
-        this->verts = verts.getOGlBuffer();
+    if (verts_.kind() == _InputArray::OPENGL_BUFFER)
+        this->verts = verts_.getOGlBuffer();
     else
-        this->verts.copyFrom(verts, ogl::Buffer::ARRAY_BUFFER);
+        this->verts.copyFrom(verts_, ogl::Buffer::ARRAY_BUFFER);
 
     this->index_type = 0;
 
     // Prepare vertex array
-    this->initVA(verts.size().width);
+    this->initVA(verts_.size().width);
 }
 
 void Mesh::initVA(int width)
@@ -1378,9 +1377,9 @@ ogl::Program Mesh::buildShader()
     return ogl::Program(vs, fs);
 }
 
-void Mesh::setShader(ogl::Program program)
+void Mesh::setShader(ogl::Program program_)
 {
-    this->program = program;
+    this->program = program_;
     this->model_loc = this->program.getUniformLocation("model");
     this->view_loc = this->program.getUniformLocation("view");
     this->proj_loc = this->program.getUniformLocation("proj");
@@ -1393,20 +1392,20 @@ void Mesh::setShader(ogl::Program program)
     }
 }
 
-Lines::Lines(InputArray points, int count)
+Lines::Lines(InputArray points_, int count_)
 {
     // Check parameter validity
-    CV_Assert(points.channels() == 1 && points.dims() == 2 && points.size().width == 6);
-    CV_Assert(points.depth() == CV_32F);
+    CV_Assert(points_.channels() == 1 && points_.dims() == 2 && points_.size().width == 6);
+    CV_Assert(points_.depth() == CV_32F);
 
     // Prepare buffers
-    if (points.kind() == _InputArray::OPENGL_BUFFER)
-        this->points = points.getOGlBuffer();
+    if (points_.kind() == _InputArray::OPENGL_BUFFER)
+        this->points = points_.getOGlBuffer();
     else
     {
-        this->points.create(points.size(), points.type(), ogl::Buffer::ARRAY_BUFFER);
-        if (count == -1 || count > 0)
-            this->points.copyFrom(points, ogl::Buffer::ARRAY_BUFFER);
+        this->points.create(points_.size(), points_.type(), ogl::Buffer::ARRAY_BUFFER);
+        if (count_ == -1 || count_ > 0)
+            this->points.copyFrom(points_, ogl::Buffer::ARRAY_BUFFER);
     }
 
     // Prepare vertex array
@@ -1427,10 +1426,10 @@ Lines::Lines(InputArray points, int count)
         }
     });
 
-    if (count == -1)
+    if (count_ == -1)
         this->count = this->points.size().height;
     else
-        this->count = count;
+        this->count = count_;
 }
 
 void Lines::draw(const View& view, const Light& light)
@@ -1450,14 +1449,14 @@ void Lines::draw(const View& view, const Light& light)
     }
 }
 
-void Lines::update(InputArray points)
+void Lines::update(InputArray points_)
 {
     // Check parameter validity
-    CV_Assert(points.channels() == 1 && points.dims() == 2 && points.size().width == 6);
-    CV_Assert(points.depth() == CV_32F);
+    CV_Assert(points_.channels() == 1 && points_.dims() == 2 && points_.size().width == 6);
+    CV_Assert(points_.depth() == CV_32F);
 
-    this->points.copyFrom(points, ogl::Buffer::ARRAY_BUFFER);
-    this->count = points.size().height;
+    this->points.copyFrom(points_, ogl::Buffer::ARRAY_BUFFER);
+    this->count = points_.size().height;
 }
 
 String Lines::getShaderName()
@@ -1501,25 +1500,25 @@ ogl::Program Lines::buildShader()
     return ogl::Program(vs, fs);
 }
 
-void Lines::setShader(ogl::Program program)
+void Lines::setShader(ogl::Program program_)
 {
-    this->program = program;
+    this->program = program_;
     this->model_loc = this->program.getUniformLocation("model");
     this->view_loc = this->program.getUniformLocation("view");
     this->proj_loc = this->program.getUniformLocation("proj");
 }
 
-PointCloud::PointCloud(InputArray points)
+PointCloud::PointCloud(InputArray points_)
 {
     // Check parameter validity
-    CV_Assert(points.channels() == 1 && points.dims() == 2 && points.size().width == 6);
-    CV_Assert(points.depth() == CV_32F);
+    CV_Assert(points_.channels() == 1 && points_.dims() == 2 && points_.size().width == 6);
+    CV_Assert(points_.depth() == CV_32F);
 
     // Prepare buffers
-    if (points.kind() == _InputArray::OPENGL_BUFFER)
-        this->points = points.getOGlBuffer();
+    if (points_.kind() == _InputArray::OPENGL_BUFFER)
+        this->points = points_.getOGlBuffer();
     else
-        this->points.copyFrom(points, ogl::Buffer::ARRAY_BUFFER);
+        this->points.copyFrom(points_, ogl::Buffer::ARRAY_BUFFER);
 
     // Prepare vertex array
     this->va.create({
@@ -1595,9 +1594,9 @@ ogl::Program PointCloud::buildShader()
     return ogl::Program(vs, fs);
 }
 
-void PointCloud::setShader(ogl::Program program)
+void PointCloud::setShader(ogl::Program program_)
 {
-    this->program = program;
+    this->program = program_;
     this->model_loc = this->program.getUniformLocation("model");
     this->view_loc = this->program.getUniformLocation("view");
     this->proj_loc = this->program.getUniformLocation("proj");
