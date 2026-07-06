@@ -51,8 +51,6 @@
 #include "opencv2/videoio.hpp"
 #endif
 
-#include "highgui/viz3d.hpp"
-
 /**
 @defgroup highgui High-level GUI
 

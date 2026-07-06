@@ -2,11 +2,14 @@
 // It is subject to the license terms in the LICENSE file found in the top-level directory
 // of this distribution and at http://opencv.org/license.html.
 
-#ifndef __OPENCV_HIGHGUI_VIZ3D_PRIVATE_HPP__
-#define __OPENCV_HIGHGUI_VIZ3D_PRIVATE_HPP__
+#ifndef __OPENCV_PTCLOUD_VIZ3D_PRIVATE_HPP__
+#define __OPENCV_PTCLOUD_VIZ3D_PRIVATE_HPP__
 
 #include "../precomp.hpp"
+#include "opencv2/core/private.hpp"  // HAVE_OPENGL from cvconfig.h
 #include "opencv2/core/opengl.hpp"
+#include "opencv2/highgui.hpp"       // window + OpenGL context (imported from highgui)
+#include "opencv2/ptcloud/viz3d.hpp" // public viz3d API declarations
 
 #include <map>
 

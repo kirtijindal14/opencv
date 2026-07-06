@@ -6,6 +6,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/ptcloud.hpp>  // cv::viz3d now lives in the ptcloud module
 
 using namespace cv;
 

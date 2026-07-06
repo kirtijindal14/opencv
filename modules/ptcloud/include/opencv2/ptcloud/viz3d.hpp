@@ -2,8 +2,8 @@
 // It is subject to the license terms in the LICENSE file found in the top-level directory
 // of this distribution and at http://opencv.org/license.html.
 
-#ifndef __OPENCV_HIGHGUI_VIZ3D_HPP__
-#define __OPENCV_HIGHGUI_VIZ3D_HPP__
+#ifndef __OPENCV_PTCLOUD_VIZ3D_HPP__
+#define __OPENCV_PTCLOUD_VIZ3D_HPP__
 
 #include "opencv2/core.hpp"
 
@@ -91,7 +91,9 @@ The camera trajectory data array must be 2D. Each row has a width of 6, where th
 @param frustum_color Color of the frustums.
 @param line_color Color of the line.
  */
-CV_EXPORTS_W void showCameraTrajectory(
+// Not CV_EXPORTS_W: the auto-bindings generator mishandles the two trailing
+// Vec3f defaults (like the other Vec3f-taking viz3d functions, it stays C++-only).
+CV_EXPORTS void showCameraTrajectory(
     const String& win_name, const String& obj_name, InputArray trajectory,
     float aspect, float scale, Vec3f frustum_color = Vec3f(1.0f, 1.0f, 1.0f),
     Vec3f line_color = Vec3f(0.5f, 0.5f, 0.5f));

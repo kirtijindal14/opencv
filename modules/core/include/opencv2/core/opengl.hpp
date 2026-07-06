@@ -276,7 +276,6 @@ private:
     int rows_;
     int cols_;
     int type_;
-    int max_size_;
 };
 
 /** @brief Smart pointer for OpenGL 2D texture memory with reference counting.

@@ -316,6 +316,8 @@ public:
     void copyFrom(GLsizeiptr size, const GLvoid* data);
     void copyTo(GLsizeiptr size, GLvoid* data) const;
 
+    void resize(GLsizeiptr size, GLenum target);
+
     void* mapHost(GLenum access);
     void unmapHost();
 
@@ -407,6 +409,19 @@ void cv::ogl::Buffer::Impl::copyFrom(GLsizeiptr size, const GLvoid* data)
     CV_CheckGlError();
 }
 
+void cv::ogl::Buffer::Impl::resize(GLsizeiptr size, GLenum target)
+{
+    gl::BindBuffer(target, bufId_);
+    CV_CheckGlError();
+
+    // Reallocate the data store while keeping the same buffer id, so bound vertex arrays stay valid.
+    gl::BufferData(target, size, 0, gl::DYNAMIC_DRAW);
+    CV_CheckGlError();
+
+    gl::BindBuffer(target, 0);
+    CV_CheckGlError();
+}
+
 void cv::ogl::Buffer::Impl::copyTo(GLsizeiptr size, GLvoid* data) const
 {
     gl::BindBuffer(gl::COPY_READ_BUFFER, bufId_);
@@ -461,7 +476,7 @@ void cv::ogl::Buffer::Impl::unmapDevice(cudaStream_t stream)
 
 #endif // HAVE_OPENGL
 
-cv::ogl::Buffer::Buffer() : rows_(0), cols_(0), type_(0), max_size_(0)
+cv::ogl::Buffer::Buffer() : rows_(0), cols_(0), type_(0)
 {
 #ifndef HAVE_OPENGL
     throw_no_ogl();
@@ -470,7 +485,7 @@ cv::ogl::Buffer::Buffer() : rows_(0), cols_(0), type_(0), max_size_(0)
 #endif
 }
 
-cv::ogl::Buffer::Buffer(int arows, int acols, int atype, unsigned int abufId, bool autoRelease) : rows_(0), cols_(0), type_(0), max_size_(0)
+cv::ogl::Buffer::Buffer(int arows, int acols, int atype, unsigned int abufId, bool autoRelease) : rows_(0), cols_(0), type_(0)
 {
 #ifndef HAVE_OPENGL
     CV_UNUSED(arows);
@@ -484,11 +499,10 @@ cv::ogl::Buffer::Buffer(int arows, int acols, int atype, unsigned int abufId, bo
     rows_ = arows;
     cols_ = acols;
     type_ = atype;
-    max_size_ = arows * acols * CV_ELEM_SIZE(atype);
 #endif
 }
 
-cv::ogl::Buffer::Buffer(Size asize, int atype, unsigned int abufId, bool autoRelease) : rows_(0), cols_(0), type_(0), max_size_(0)
+cv::ogl::Buffer::Buffer(Size asize, int atype, unsigned int abufId, bool autoRelease) : rows_(0), cols_(0), type_(0)
 {
 #ifndef HAVE_OPENGL
     CV_UNUSED(asize);
@@ -501,11 +515,10 @@ cv::ogl::Buffer::Buffer(Size asize, int atype, unsigned int abufId, bool autoRel
     rows_ = asize.height;
     cols_ = asize.width;
     type_ = atype;
-    max_size_ = rows_ * cols_ * CV_ELEM_SIZE(atype);
 #endif
 }
 
-cv::ogl::Buffer::Buffer(InputArray arr, Target target, bool autoRelease) : rows_(0), cols_(0), type_(0), max_size_(0)
+cv::ogl::Buffer::Buffer(InputArray arr, Target target, bool autoRelease) : rows_(0), cols_(0), type_(0)
 {
 #ifndef HAVE_OPENGL
     CV_UNUSED(arr);
@@ -549,12 +562,13 @@ void cv::ogl::Buffer::create(int arows, int acols, int atype, Target target, boo
 #else
     if (rows_ != arows || cols_ != acols || type_ != atype)
     {
-        const GLsizeiptr asize = arows * acols * CV_ELEM_SIZE(atype);
-        if (asize > max_size_)
-        {
+        const GLsizeiptr asize = (GLsizeiptr)arows * acols * CV_ELEM_SIZE(atype);
+        // Resize in place when sole owner (keeps the GL buffer id, so bound vertex arrays such
+        // as the per-frame grid stay valid); otherwise allocate fresh, preserving copy-on-write.
+        if (impl_->bufId() != 0 && impl_.use_count() == 1)
+            impl_->resize(asize, target);
+        else
             impl_.reset(new Impl(asize, 0, target, autoRelease));
-            max_size_ = asize;
-        }
         rows_ = arows;
         cols_ = acols;
         type_ = atype;

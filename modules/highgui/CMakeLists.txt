@@ -40,10 +40,6 @@ file(GLOB highgui_ext_hdrs
      "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/*.hpp"
      "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/*.h")
 
-file(GLOB highgui_viz3d_srcs "${CMAKE_CURRENT_LIST_DIR}/src/viz3d/*.cpp")
-file(GLOB highgui_viz3d_hdrs "${CMAKE_CURRENT_LIST_DIR}/src/viz3d/*.hpp")
-list(APPEND highgui_srcs "${highgui_viz3d_srcs}" "${highgui_viz3d_hdrs}")
-
 set(OPENCV_HIGHGUI_BUILTIN_BACKEND "")
 
 if(WITH_FRAMEBUFFER AND HAVE_FRAMEBUFFER)
