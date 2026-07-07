@@ -52,6 +52,37 @@ CV_EXPORTS_W void loadPointCloud(const String &filename, OutputArray vertices, O
  */
 CV_EXPORTS_W void savePointCloud(const String &filename, InputArray vertices, InputArray normals = noArray(), InputArray rgb = noArray());
 
+/** @brief Removes statistical outliers from a point cloud.
+ *
+ * For each point, the mean distance to its @p meanK nearest neighbors is computed. Points whose
+ * mean distance is greater than `global_mean + stddevMulThresh * global_stddev` are considered
+ * outliers and removed. Useful for removing sparse measurement noise scattered around a surface.
+ *
+ * @param inputCloud Input point cloud, 3-channel float array (CV_32FC3), or an Nx3 CV_32F matrix.
+ * @param outputCloud Output filtered point cloud, in the same 3-channel float format.
+ * @param meanK Number of nearest neighbors used to estimate the mean distance of each point.
+ * @param stddevMulThresh Standard-deviation multiplier for the distance threshold.
+ * @param keptIndices Optional output, indices (CV_32S) into the input cloud of the points that were kept.
+ */
+CV_EXPORTS_W void removeStatisticalOutliers(InputArray inputCloud, OutputArray outputCloud,
+                                            int meanK = 20, double stddevMulThresh = 2.0,
+                                            OutputArray keptIndices = noArray());
+
+/** @brief Removes radius outliers from a point cloud.
+ *
+ * A point is removed if it has fewer than @p minNeighbors other points within @p radius. Useful for
+ * removing isolated points and small floating blobs far from the main surface.
+ *
+ * @param inputCloud Input point cloud, 3-channel float array (CV_32FC3), or an Nx3 CV_32F matrix.
+ * @param outputCloud Output filtered point cloud, in the same 3-channel float format.
+ * @param radius Search radius.
+ * @param minNeighbors Minimum number of neighbors (not counting the point itself) required to keep a point.
+ * @param keptIndices Optional output, indices (CV_32S) into the input cloud of the points that were kept.
+ */
+CV_EXPORTS_W void removeRadiusOutliers(InputArray inputCloud, OutputArray outputCloud,
+                                       double radius, int minNeighbors = 16,
+                                       OutputArray keptIndices = noArray());
+
 /** @brief Loads a mesh from a file.
  *
  * The function loads mesh from the specified file and returns it.
