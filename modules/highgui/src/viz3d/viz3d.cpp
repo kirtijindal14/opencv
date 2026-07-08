@@ -519,7 +519,7 @@ void showMesh(const String& win_name, const String& obj_name, InputArray verts, 
 #else
     Window* win = getWindow(win_name);
     setOpenGlContext(win_name);
-    win->set(obj_name, new Mesh(verts, indices));   // set() deletes any previous object
+    win->set(obj_name, new Mesh(verts, indices));
     updateWindow(win_name);
 #endif
 }
@@ -535,7 +535,7 @@ void showMesh(const String& win_name, const String& obj_name, InputArray verts)
 #else
     Window* win = getWindow(win_name);
     setOpenGlContext(win_name);
-    win->set(obj_name, new Mesh(verts));   // set() deletes any previous object
+    win->set(obj_name, new Mesh(verts));
     updateWindow(win_name);
 #endif
 }
@@ -551,7 +551,7 @@ void showPoints(const String& win_name, const String& obj_name, InputArray point
 #else
     Window* win = getWindow(win_name);
     setOpenGlContext(win_name);
-    win->set(obj_name, new PointCloud(points));   // set() deletes any previous object
+    win->set(obj_name, new PointCloud(points));
     updateWindow(win_name);
 #endif
 }
@@ -614,7 +614,7 @@ void showLines(const String& win_name, const String& obj_name, InputArray points
 #else
     Window* win = getWindow(win_name);
     setOpenGlContext(win_name);
-    win->set(obj_name, new Lines(points));   // set() deletes any previous object
+    win->set(obj_name, new Lines(points));
     updateWindow(win_name);
 #endif
 }

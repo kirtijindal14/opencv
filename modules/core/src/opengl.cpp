@@ -414,8 +414,7 @@ void cv::ogl::Buffer::Impl::resize(GLsizeiptr size, GLenum target)
     gl::BindBuffer(target, bufId_);
     CV_CheckGlError();
 
-    // Reallocate this buffer object's data store while keeping the SAME buffer id, so any
-    // vertex array bound to it stays valid.
+    // Reallocate the data store while keeping the same buffer id, so bound vertex arrays stay valid.
     gl::BufferData(target, size, 0, gl::DYNAMIC_DRAW);
     CV_CheckGlError();
 
@@ -564,10 +563,8 @@ void cv::ogl::Buffer::create(int arows, int acols, int atype, Target target, boo
     if (rows_ != arows || cols_ != acols || type_ != atype)
     {
         const GLsizeiptr asize = (GLsizeiptr)arows * acols * CV_ELEM_SIZE(atype);
-        // Reuse the existing buffer in place only when we are its sole owner: this keeps its
-        // GL buffer id, so vertex arrays already bound to it (e.g. the grid, re-uploaded every
-        // frame via update()) stay valid. If the Impl is shared (a copied Buffer) or empty,
-        // allocate a fresh buffer instead, preserving copy-on-write semantics.
+        // Resize in place when sole owner (keeps the GL buffer id, so bound vertex arrays such
+        // as the per-frame grid stay valid); otherwise allocate fresh, preserving copy-on-write.
         if (impl_->bufId() != 0 && impl_.use_count() == 1)
             impl_->resize(asize, target);
         else
