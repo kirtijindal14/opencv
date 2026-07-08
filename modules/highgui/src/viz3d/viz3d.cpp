@@ -518,12 +518,8 @@ void showMesh(const String& win_name, const String& obj_name, InputArray verts, 
     CV_Error(cv::Error::OpenGlNotSupported, "The library is compiled without OpenGL support");
 #else
     Window* win = getWindow(win_name);
-    Object* obj = win->get(obj_name);
-    if (obj)
-        delete obj;
     setOpenGlContext(win_name);
-    obj = new Mesh(verts, indices);
-    win->set(obj_name, obj);
+    win->set(obj_name, new Mesh(verts, indices));   // set() deletes any previous object
     updateWindow(win_name);
 #endif
 }
@@ -538,12 +534,8 @@ void showMesh(const String& win_name, const String& obj_name, InputArray verts)
     CV_Error(cv::Error::OpenGlNotSupported, "The library is compiled without OpenGL support");
 #else
     Window* win = getWindow(win_name);
-    Object* obj = win->get(obj_name);
-    if (obj)
-        delete obj;
     setOpenGlContext(win_name);
-    obj = new Mesh(verts);
-    win->set(obj_name, obj);
+    win->set(obj_name, new Mesh(verts));   // set() deletes any previous object
     updateWindow(win_name);
 #endif
 }
@@ -558,12 +550,8 @@ void showPoints(const String& win_name, const String& obj_name, InputArray point
     CV_Error(cv::Error::OpenGlNotSupported, "The library is compiled without OpenGL support");
 #else
     Window* win = getWindow(win_name);
-    Object* obj = win->get(obj_name);
-    if (obj)
-        delete obj;
     setOpenGlContext(win_name);
-    obj = new PointCloud(points);
-    win->set(obj_name, obj);
+    win->set(obj_name, new PointCloud(points));   // set() deletes any previous object
     updateWindow(win_name);
 #endif
 }
@@ -625,12 +613,8 @@ void showLines(const String& win_name, const String& obj_name, InputArray points
     CV_Error(cv::Error::OpenGlNotSupported, "The library is compiled without OpenGL support");
 #else
     Window* win = getWindow(win_name);
-    Object* obj = win->get(obj_name);
-    if (obj)
-        delete obj;
     setOpenGlContext(win_name);
-    obj = new Lines(points);
-    win->set(obj_name, obj);
+    win->set(obj_name, new Lines(points));   // set() deletes any previous object
     updateWindow(win_name);
 #endif
 }
