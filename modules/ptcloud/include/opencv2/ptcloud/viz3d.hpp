@@ -108,7 +108,6 @@ Shading is only enabled when using normals.
 @param obj_name Name of the object.
 @param verts Vertices input array.
 @param indices Indices input array.
-@param shading Should the mesh have shading?
  */
 CV_EXPORTS void showMesh(const String& win_name, const String& obj_name, InputArray verts, InputArray indices);
 

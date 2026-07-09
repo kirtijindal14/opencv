@@ -445,8 +445,9 @@ void showCameraTrajectory(
     {
         Vec3f position = { data.at<float>(i, 0), data.at<float>(i, 1), data.at<float>(i, 2) };
         Vec3f forward = normalize(Vec3f { data.at<float>(i, 3), data.at<float>(i, 4), data.at<float>(i, 5) });
-        Vec3f world_up = { 0.0f, 1.0f, 0.0f };
-        Vec3f right = forward.cross(world_up);
+        // Avoid a zero 'right' when forward is (anti)parallel to world up.
+        Vec3f world_up = (fabsf(forward[1]) > 0.99f) ? Vec3f{0.0f, 0.0f, 1.0f} : Vec3f{0.0f, 1.0f, 0.0f};
+        Vec3f right = normalize(forward.cross(world_up));
         Vec3f up = forward.cross(right);
 
         Vec3f back_f[4] = {
@@ -570,7 +571,6 @@ void showRGBD(const String& win_name, const String& obj_name, InputArray img, co
     CV_Assert(img.dims() == 2 && img.channels() == 4 && img.type() == CV_32FC4);
 
     Mat mat = img.getMat();
-    Mat points;
 
     // This section (RGBD to point cloud) should be changed to use the 3d module when
     // #20013 is merged.
@@ -580,8 +580,10 @@ void showRGBD(const String& win_name, const String& obj_name, InputArray img, co
     float cx = intrinsics(0, 2);
     float cy = intrinsics(1, 2);
 
-    for (int u = 0; u < mat.cols; ++u)
-        for (int v = 0; v < mat.rows; ++v)
+    // Pre-size and fill row-major (avoids per-pixel Mat reallocation).
+    Mat points(mat.rows * mat.cols, 6, CV_32F);
+    for (int v = 0; v < mat.rows; ++v)
+        for (int u = 0; u < mat.cols; ++u)
         {
             Vec4f c = mat.at<Vec4f>(v, u);
             float d = c(3) * 0.001f; // mm to m
@@ -592,11 +594,9 @@ void showRGBD(const String& win_name, const String& obj_name, InputArray img, co
             float x = x_over_z * z;
             float y = y_over_z * z;
 
-            float point[] = {
-                x * scale, y * scale, z * scale,
-                c(0) / 255.0f, c(1) / 255.0f, c(2) / 255.0f,
-            };
-            points.push_back(Mat(1, 6, CV_32F, point));
+            float* p = points.ptr<float>(v * mat.cols + u);
+            p[0] = x * scale;      p[1] = y * scale;      p[2] = z * scale;
+            p[3] = c(0) / 255.0f;  p[4] = c(1) / 255.0f;  p[5] = c(2) / 255.0f;
         }
 
     showPoints(win_name, obj_name, points);
@@ -845,11 +845,8 @@ static Mat getGridVertices(const View& view)
     const Vec3f camera_dir = view.getOrigin() - view.getPosition();
     const float scale = 0.3f;
 
+    // Snap spacing so distance*scale/tick_step stays in [2, 4) via doubling/halving.
     float tick_step = 1.0f;
-    if (view.getDistance() * scale / tick_step > 4.0)
-        tick_step *= powf(floorf(logf(view.getDistance() * scale) / logf(tick_step)), 2.0);
-
-    tick_step *= log1p(view.getDistance() * scale / 4.0);
     while (view.getDistance() * scale / tick_step > 4.0f)
         tick_step *= 2.0f;
     while (view.getDistance() * scale / tick_step < 2.0f)
@@ -1009,7 +1006,6 @@ void Window::draw()
 
     if (this->grid)
     {
-        Mat labels;
         static_cast<Lines*>(this->grid)->update(getGridVertices(this->view));
         this->grid->draw(this->view, this->sun);
     }

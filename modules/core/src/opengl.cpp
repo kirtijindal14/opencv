@@ -1847,22 +1847,16 @@ void cv::ogl::Program::Impl::bind()
 
 int cv::ogl::Program::Impl::getAttributeLocation(const char* name) const
 {
+    // -1 if absent (e.g. optimized out); caller decides.
     int location = gl::GetAttribLocation(programId_, name);
-    if (location < 0)
-    {
-        CV_Error(Error::OpenGlApiCallError, "Attribute not found");
-    }
     CV_CheckGlError();
     return location;
 }
 
 int cv::ogl::Program::Impl::getUniformLocation(const char* name) const
 {
+    // -1 if absent (e.g. optimized out); caller decides.
     int location = gl::GetUniformLocation(programId_, name);
-    if (location < 0)
-    {
-        CV_Error(Error::OpenGlApiCallError, "Attribute not found");
-    }
     CV_CheckGlError();
     return location;
 }

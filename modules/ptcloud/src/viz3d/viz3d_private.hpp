@@ -155,14 +155,14 @@ private:
     int sun_diffuse_loc;
 };
 
-// Class which stores the viz3d data associated to a textured mesh object.
-class TexturedMesh : public Object
+// Class which stores the viz3d data associated to a lines object.
+class Lines : public Object
 {
 public:
-    TexturedMesh(InputArray verts, Mat tex, int count = -1);
+    Lines(InputArray points, int count = -1);
 
     virtual void draw(const View& view, const Light& light) override;
-    void update(InputArray verts);
+    void update(InputArray points);
 
     virtual String getShaderName() override;
     virtual ogl::Program buildShader() override;
@@ -171,40 +171,11 @@ public:
 private:
     ogl::Program program;
     ogl::VertexArray va;
-    ogl::Buffer verts;
-    ogl::Texture2D tex;
+    ogl::Buffer points;
 
-    int count;
-
-    int tex_loc;
     int model_loc;
     int view_loc;
     int proj_loc;
-};
-
-// Class which stores the viz3d data associated to a lines object.
-class Lines : public Object
-{
-public:
-	Lines(InputArray points, int count = -1);
-
-	virtual void draw(const View& view, const Light& light) override;
-    void update(InputArray points);
-
-	virtual String getShaderName() override;
-	virtual ogl::Program buildShader() override;
-	virtual void setShader(ogl::Program program) override;
-
-private:
-	ogl::Program program;
-	ogl::VertexArray va;
-	ogl::Buffer points;
-
-	ogl::IndexType index_type;
-
-	int model_loc;
-	int view_loc;
-	int proj_loc;
 
     int count;
 };
