@@ -46,9 +46,18 @@ static Window* getWindow(const String& win_name)
     {
         setOpenGlContext(win_name);
         win = new Window(win_name);
-        setOpenGlDrawCallback(win_name, &openGlDrawCallback, win);
-        setOpenGlFreeCallback(win_name, &openGlFreeCallback);
-        setMouseCallback(win_name, &mouseCallback, win);
+        try
+        {
+            setOpenGlDrawCallback(win_name, &openGlDrawCallback, win);
+            setOpenGlFreeCallback(win_name, &openGlFreeCallback);
+            setMouseCallback(win_name, &mouseCallback, win);
+        }
+        catch (...)
+        {
+            setOpenGlDrawCallback(win_name, 0, 0);   // detach before freeing
+            delete win;
+            throw;
+        }
     }
     else
     {
@@ -339,7 +348,7 @@ void showSphere(const String& win_name, const String& obj_name, float radius, co
             }
         }
 
-        const Mat points_mat = Mat(Size(6, points_data.size() / 6), CV_32F, points_data.data());
+        const Mat points_mat = Mat(Size(6, static_cast<int>(points_data.size() / 6)), CV_32F, points_data.data());
 
         showLines(win_name, obj_name, points_mat);
     }
@@ -396,7 +405,7 @@ void showSphere(const String& win_name, const String& obj_name, float radius, co
                 verts_data[6 * i + 2] *= r;
             }
 
-            const Mat verts_mat = Mat(Size(6, verts_data.size() / 6), CV_32F, verts_data.data());
+            const Mat verts_mat = Mat(Size(6, static_cast<int>(verts_data.size() / 6)), CV_32F, verts_data.data());
             showMesh(win_name, obj_name, verts_mat);
         }
         else
@@ -413,7 +422,7 @@ void showSphere(const String& win_name, const String& obj_name, float radius, co
                 verts_data[9 * i + 2] *= r;
             }
 
-            const Mat verts_mat = Mat(Size(9, verts_data.size() / 9), CV_32F, verts_data.data());
+            const Mat verts_mat = Mat(Size(9, static_cast<int>(verts_data.size() / 9)), CV_32F, verts_data.data());
             showMesh(win_name, obj_name, verts_mat);
         }
     }
@@ -503,7 +512,7 @@ void showCameraTrajectory(
         });
     }
 
-    const Mat points_mat = Mat(Size(6, points_data.size() / 6), CV_32F, points_data.data());
+    const Mat points_mat = Mat(Size(6, static_cast<int>(points_data.size() / 6)), CV_32F, points_data.data());
     showLines(win_name, obj_name, points_mat);
 
 #endif
@@ -591,7 +600,7 @@ void showRGBD(const String& win_name, const String& obj_name, InputArray img, co
 
             float x_over_z = (cx - static_cast<float>(u)) / fx;
             float y_over_z = (cy - static_cast<float>(v)) / fy;
-            float z = d/* / sqrt(1.0f + x_over_z * x_over_z + y_over_z * y_over_z)*/;
+            float z = d;
             float x = x_over_z * z;
             float y = y_over_z * z;
 
@@ -848,7 +857,12 @@ static Mat getGridVertices(const View& view)
 
     const float tick_step = detail::gridTickStep(view.getDistance() * scale);
 
-    Mat points;
+    // Accumulate line vertices (6 floats each: xyz + rgb), then build one Mat --
+    // avoids the per-frame Mat::push_back reallocation on the render thread.
+    std::vector<float> verts;
+    verts.reserve(4096 * 6);
+    auto addRows = [&](const float* d, int rows) { verts.insert(verts.end(), d, d + rows * 6); };
+
     float face_sign[3];
 
     const Vec3f min_p = center - Vec3f(1.0f, 1.0f, 1.0f) * view.getDistance() * scale;
@@ -880,7 +894,7 @@ static Mat getGridVertices(const View& view)
                 b(0), b(1), b(2), grid_color(0), grid_color(1), grid_color(2),
             };
 
-            points.push_back(Mat(2, 6, CV_32F, data));
+            addRows(data, 2);
         }
 
         float y = (floor(min_p((ai + 1) % 3) / tick_step) + 1.0f) * tick_step;
@@ -900,7 +914,7 @@ static Mat getGridVertices(const View& view)
                 b(0), b(1), b(2), grid_color(0), grid_color(1), grid_color(2),
             };
 
-            points.push_back(Mat(2, 6, CV_32F, data));
+            addRows(data, 2);
         }
     }
 
@@ -920,7 +934,7 @@ static Mat getGridVertices(const View& view)
             d(0), d(1), d(2), 0.0f, 0.8f, 0.0f,
         };
 
-        points.push_back(Mat(6, 6, CV_32F, data));
+        addRows(data, 6);
 
         float x = (floor(min_p(0) / tick_step) + 1.0f) * tick_step;
         for (; x < max_p(0); x += tick_step)
@@ -936,7 +950,7 @@ static Mat getGridVertices(const View& view)
                 lb(0), lb(1), lb(2), 0.8f, 0.0f, 0.0f,
             };
 
-            points.push_back(Mat(2, 6, CV_32F, line));
+            addRows(line, 2);
         }
 
         float y = (floor(min_p(1) / tick_step) + 1.0f) * tick_step;
@@ -953,7 +967,7 @@ static Mat getGridVertices(const View& view)
                 lb(0), lb(1), lb(2), 0.0f, 0.8f, 0.0f,
             };
 
-            points.push_back(Mat(2, 6, CV_32F, line));
+            addRows(line, 2);
         }
 
         float z = (floor(min_p(2) / tick_step) + 1.0f) * tick_step;
@@ -970,11 +984,13 @@ static Mat getGridVertices(const View& view)
                 lb(0), lb(1), lb(2), 0.0f, 0.0f, 0.8f,
             };
 
-            points.push_back(Mat(2, 6, CV_32F, line));
+            addRows(line, 2);
         }
     }
 
-    return points;
+    if (verts.empty())
+        return Mat();
+    return Mat((int)(verts.size() / 6), 6, CV_32F, verts.data()).clone();
 }
 
 void Window::setGridVisible(bool visible)

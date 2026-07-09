@@ -610,7 +610,6 @@ void cv::ogl::Buffer::copyFrom(InputArray arr, Target target, bool autoRelease)
 
     const Size asize = arr.size();
     const int atype = arr.type();
-
     create(asize, atype, target, autoRelease);
 
     switch (kind)

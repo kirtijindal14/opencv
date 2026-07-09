@@ -3312,11 +3312,15 @@ void DefaultViewPort::setSize(QSize /*size_*/)
 OpenGlViewPort::OpenGlViewPort(QWidget* _parent) : OpenCVQtWidgetBase(_parent), OCVViewPort(), size(-1, -1)
 {
     glDrawCallback = 0;
+    glFreeCallback = 0;
     glDrawData = 0;
 }
 
 OpenGlViewPort::~OpenGlViewPort()
 {
+    // Fire the free callback so user GL resources are released (parity with GTK/w32).
+    if (glFreeCallback && glDrawData)
+        glFreeCallback(glDrawData);
 }
 
 QWidget* OpenGlViewPort::getWidget()
