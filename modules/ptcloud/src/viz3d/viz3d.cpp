@@ -4,6 +4,7 @@
 
 #include "../precomp.hpp"
 #include "viz3d_private.hpp"
+#include "grid_ticks.hpp"
 #include "opencv2/core/utils/logger.hpp"
 #include "opencv2/imgproc.hpp"
 
@@ -845,12 +846,7 @@ static Mat getGridVertices(const View& view)
     const Vec3f camera_dir = view.getOrigin() - view.getPosition();
     const float scale = 0.3f;
 
-    // Snap spacing so distance*scale/tick_step stays in [2, 4) via doubling/halving.
-    float tick_step = 1.0f;
-    while (view.getDistance() * scale / tick_step > 4.0f)
-        tick_step *= 2.0f;
-    while (view.getDistance() * scale / tick_step < 2.0f)
-        tick_step *= 0.5f;
+    const float tick_step = detail::gridTickStep(view.getDistance() * scale);
 
     Mat points;
     float face_sign[3];
